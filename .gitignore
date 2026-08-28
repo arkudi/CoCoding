@@ -48,3 +48,7 @@ build/
 
 # Local Superpowers design and planning artifacts
 /docs/superpowers/
+/.superpowers/
+
+# Local Git worktrees
+/.worktrees/
