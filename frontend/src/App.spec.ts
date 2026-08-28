@@ -18,16 +18,17 @@ test('renders the three primary work areas', () => {
 
 test('creates a session and shows it in history', async () => {
   const user = userEvent.setup()
-  vi.stubGlobal('fetch', vi.fn()
+  const fetchMock = vi.fn()
     .mockResolvedValueOnce(new Response(JSON.stringify([]), { status: 200 }))
     .mockResolvedValueOnce(new Response(JSON.stringify({
-      id: 'session-1',
+      id: '3d66a599-d202-4c8f-b3c3-7dc45888d277',
       title: 'Fix calculator',
       workspace_path: 'F:/demo/calculator',
       status: 'idle',
       created_at: '2026-08-28T10:00:00Z',
       updated_at: '2026-08-28T10:00:00Z',
-    }), { status: 201 })))
+    }), { status: 201 }))
+  vi.stubGlobal('fetch', fetchMock)
 
   render(App, { global: { plugins: [createPinia()] } })
   await user.click(screen.getByRole('button', { name: '新建任务' }))
@@ -36,6 +37,14 @@ test('creates a session and shows it in history', async () => {
   await user.click(screen.getByRole('button', { name: '创建' }))
 
   expect(await screen.findByRole('button', { name: 'Fix calculator' })).toBeTruthy()
+  expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/sessions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      title: 'Fix calculator',
+      workspace_path: 'F:/demo/calculator',
+    }),
+  })
 })
 
 test('shows a failed history load in the normal sidebar state', async () => {

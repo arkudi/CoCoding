@@ -1,3 +1,6 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -10,12 +13,20 @@ from app.db.database import build_engine, build_session_factory, create_schema
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     resolved = settings or get_settings()
-    app = FastAPI(title=resolved.app_name)
-    engine = build_engine(resolved.database_url)
-    create_schema(engine)
+
+    @asynccontextmanager
+    async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+        engine = build_engine(resolved.database_url)
+        create_schema(engine)
+        application.state.engine = engine
+        application.state.session_factory = build_session_factory(engine)
+        try:
+            yield
+        finally:
+            engine.dispose()
+
+    app = FastAPI(title=resolved.app_name, lifespan=lifespan)
     app.state.settings = resolved
-    app.state.engine = engine
-    app.state.session_factory = build_session_factory(engine)
     app.include_router(health_router, prefix="/api")
     app.include_router(sessions_router, prefix="/api")
 

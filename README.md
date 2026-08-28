@@ -5,7 +5,7 @@ CoCoding is a local development foundation with a FastAPI backend and a Vue fron
 ## Prerequisites
 
 - Python 3.11 or later
-- Node.js and npm
+- Node.js 24.15 or later and npm (the committed lockfile is supported on this runtime)
 
 ## Backend setup
 
@@ -71,8 +71,12 @@ npm run build
 
 ## Configuration
 
-Configuration uses environment variables prefixed with `COCODING_`. Useful values include `COCODING_DATABASE_URL`, `COCODING_FRONTEND_DIST`, and `DEEPSEEK_API_KEY`. A local `.env` file is ignored by Git and may hold machine-specific settings; do not commit credentials.
+Application configuration uses the `COCODING_` prefix, including `COCODING_DATABASE_URL` and `COCODING_FRONTEND_DIST`. DeepSeek configuration uses the unprefixed `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL`, and `DEEPSEEK_MODEL` names shown in `.env.example`. A local `.env` file is ignored by Git and may hold machine-specific settings; do not commit credentials.
 
 ## Current scope
 
-This foundation provides a local session-aware coding workspace shell, health and session APIs, and a production-like static frontend host. It does not yet execute coding tasks or include Agent runtime features.
+This foundation provides a local session-aware coding workspace shell, health and session APIs, and a production-like static frontend host. Vue Router task pages, the mobile workspace drawer, and the Agent runtime are future work; this slice does not yet execute coding tasks.
+
+## Dependency debt
+
+The backend test suite currently reports Starlette's upstream `TestClient` deprecation warning about the `httpx` compatibility layer. The supported FastAPI/Starlette dependency set does not yet provide the suggested replacement package, so the warning remains visible rather than being filtered or hidden.

@@ -13,11 +13,20 @@ export const useSessionsStore = defineStore('sessions', {
   actions: {
     async load() {
       const load_id = ++this.load_id
+      const item_ids_at_start = new Set(this.items.map(item => item.id))
       this.loading = true
       this.error = null
       try {
         const items = await sessionApi.listSessions()
-        if (this.load_id === load_id) this.items = items
+        if (this.load_id === load_id) {
+          const added_during_load = this.items.filter(item => !item_ids_at_start.has(item.id))
+          const seen = new Set<string>()
+          this.items = [...added_during_load, ...items].filter((item) => {
+            if (seen.has(item.id)) return false
+            seen.add(item.id)
+            return true
+          })
+        }
       } catch (error) {
         if (this.load_id === load_id) {
           this.error = error instanceof Error ? error.message : '加载失败'
@@ -28,7 +37,6 @@ export const useSessionsStore = defineStore('sessions', {
     },
     async create(payload: SessionCreate) {
       const created = await sessionApi.createSession(payload)
-      this.load_id += 1
       this.loading = false
       this.items.unshift(created)
       this.current_id = created.id

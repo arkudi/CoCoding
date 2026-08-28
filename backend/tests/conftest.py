@@ -21,4 +21,3 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
     application = create_app(settings)
     with TestClient(application) as test_client:
         yield test_client
-    application.state.engine.dispose()
