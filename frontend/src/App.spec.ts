@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/vue'
+import userEvent from '@testing-library/user-event'
 import { createPinia } from 'pinia'
-import { expect, test } from 'vitest'
+import { expect, test, vi } from 'vitest'
 import App from './App.vue'
 
 test('renders the three primary work areas', () => {
@@ -9,4 +10,26 @@ test('renders the three primary work areas', () => {
   expect(screen.getByRole('complementary', { name: '任务' })).toBeTruthy()
   expect(screen.getByRole('main', { name: '执行过程' })).toBeTruthy()
   expect(screen.getByRole('complementary', { name: '工作区' })).toBeTruthy()
+})
+
+test('creates a session and shows it in history', async () => {
+  const user = userEvent.setup()
+  vi.stubGlobal('fetch', vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify([]), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({
+      id: 'session-1',
+      title: 'Fix calculator',
+      workspace_path: 'F:/demo/calculator',
+      status: 'idle',
+      created_at: '2026-08-28T10:00:00Z',
+      updated_at: '2026-08-28T10:00:00Z',
+    }), { status: 201 })))
+
+  render(App, { global: { plugins: [createPinia()] } })
+  await user.click(screen.getByRole('button', { name: '新建任务' }))
+  await user.type(screen.getByLabelText('任务名称'), 'Fix calculator')
+  await user.type(screen.getByLabelText('工作区路径'), 'F:/demo/calculator')
+  await user.click(screen.getByRole('button', { name: '创建' }))
+
+  expect(await screen.findByRole('button', { name: 'Fix calculator' })).toBeTruthy()
 })

@@ -1,4 +1,7 @@
 import { cleanup } from '@testing-library/vue'
-import { afterEach } from 'vitest'
+import { afterEach, vi } from 'vitest'
 
-afterEach(() => cleanup())
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})

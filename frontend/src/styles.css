@@ -27,6 +27,14 @@ button:focus-visible, input:focus-visible { outline: 3px solid #8eb7a0; outline-
 .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 32px; }
 .brand-mark { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; color: white; background: var(--accent); }
 .primary { width: 100%; padding: 10px 14px; border: 0; border-radius: 9px; color: white; background: var(--accent); cursor: pointer; }
+.session-form, .session-form label { display: grid; gap: 8px; }
+.session-form { gap: 14px; }
+.session-form input { width: 100%; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; background: white; }
+.form-actions { display: flex; gap: 8px; }
+.form-actions button { flex: 1; padding: 9px; border: 1px solid var(--line); border-radius: 8px; }
+.session-list { display: grid; gap: 6px; margin-top: 24px; }
+.session-list button { padding: 10px; border: 0; border-radius: 8px; text-align: left; background: transparent; }
+.session-list button:hover, .session-list button.selected { background: #e7ece6; }
 .timeline { display: grid; place-items: center; padding: 48px; }
 .empty-state { max-width: 480px; }
 .empty-state h1 { margin: 8px 0; font-family: Georgia, serif; font-size: clamp(36px, 5vw, 64px); font-weight: 500; }
