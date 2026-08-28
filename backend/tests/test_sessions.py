@@ -9,7 +9,7 @@ def test_create_and_list_session(client: TestClient, tmp_path: Path) -> None:
 
     created = client.post(
         "/api/sessions",
-        json={"title": "Fix calculator", "workspace_path": str(workspace)},
+        json={"title": "  Fix calculator  ", "workspace_path": str(workspace)},
     )
 
     assert created.status_code == 201
@@ -34,3 +34,17 @@ def test_create_session_rejects_missing_workspace(
 
     assert response.status_code == 422
     assert response.json()["detail"] == "Workspace directory does not exist"
+
+
+def test_create_session_rejects_whitespace_only_title(
+    client: TestClient, tmp_path: Path
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    response = client.post(
+        "/api/sessions",
+        json={"title": "   ", "workspace_path": str(workspace)},
+    )
+
+    assert response.status_code == 422

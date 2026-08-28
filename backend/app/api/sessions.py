@@ -21,7 +21,7 @@ def create_session(payload: SessionCreate, db: Session = Depends(get_db)) -> Ses
     if not workspace.is_dir():
         raise HTTPException(status_code=422, detail="Workspace directory does not exist")
     record = SessionRepository(db).create(
-        title=payload.title.strip(), workspace_path=str(workspace)
+        title=payload.title, workspace_path=str(workspace)
     )
     return SessionRead.model_validate(record)
 
