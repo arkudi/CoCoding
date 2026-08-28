@@ -18,5 +18,7 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
         database_url=f"sqlite:///{tmp_path / 'test.db'}",
         frontend_dist=tmp_path / "missing-dist",
     )
-    with TestClient(create_app(settings)) as test_client:
+    application = create_app(settings)
+    with TestClient(application) as test_client:
         yield test_client
+    application.state.engine.dispose()
