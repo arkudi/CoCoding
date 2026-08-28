@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -18,6 +19,9 @@ def test_create_and_list_session(client: TestClient, tmp_path: Path) -> None:
     assert payload["workspace_path"] == str(workspace.resolve())
     assert payload["status"] == "idle"
     assert payload["id"]
+    for field in ("created_at", "updated_at"):
+        timestamp = datetime.fromisoformat(payload[field].replace("Z", "+00:00"))
+        assert timestamp.utcoffset() == timedelta(0)
 
     listed = client.get("/api/sessions")
     assert listed.status_code == 200
