@@ -1,4 +1,6 @@
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api.health import router as health_router
 from app.api.sessions import router as sessions_router
@@ -16,6 +18,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.session_factory = build_session_factory(engine)
     app.include_router(health_router, prefix="/api")
     app.include_router(sessions_router, prefix="/api")
+
+    assets = resolved.frontend_dist / "assets"
+    if assets.is_dir():
+        app.mount("/assets", StaticFiles(directory=assets), name="frontend-assets")
+
+    @app.get("/", include_in_schema=False)
+    def frontend_root():
+        index = resolved.frontend_dist / "index.html"
+        if index.is_file():
+            return FileResponse(index)
+        return {
+            "app": resolved.app_name,
+            "message": "Frontend build not found; run the Vite development server.",
+        }
+
     return app
 
 
