@@ -31,12 +31,12 @@ async function submit() {
     <form v-else class="session-form" @submit.prevent="submit">
       <label>任务名称<input v-model="title" required /></label>
       <label>工作区路径<input v-model="workspace_path" required /></label>
-      <p v-if="sessions.error" role="alert">{{ sessions.error }}</p>
       <div class="form-actions">
         <button type="button" @click="creating = false">取消</button>
         <button class="primary" type="submit" :disabled="submitting">创建</button>
       </div>
     </form>
+    <p v-if="sessions.error" role="alert">{{ sessions.error }}</p>
     <nav class="session-list" aria-label="任务历史">
       <button
         v-for="session in sessions.items"

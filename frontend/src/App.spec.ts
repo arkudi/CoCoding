@@ -5,6 +5,10 @@ import { expect, test, vi } from 'vitest'
 import App from './App.vue'
 
 test('renders the three primary work areas', () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+    new Response(JSON.stringify([]), { status: 200 }),
+  ))
+
   render(App, { global: { plugins: [createPinia()] } })
 
   expect(screen.getByRole('complementary', { name: '任务' })).toBeTruthy()
@@ -32,4 +36,14 @@ test('creates a session and shows it in history', async () => {
   await user.click(screen.getByRole('button', { name: '创建' }))
 
   expect(await screen.findByRole('button', { name: 'Fix calculator' })).toBeTruthy()
+})
+
+test('shows a failed history load in the normal sidebar state', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+    new Response(JSON.stringify({ detail: '无法加载任务历史' }), { status: 503 }),
+  ))
+
+  render(App, { global: { plugins: [createPinia()] } })
+
+  expect((await screen.findByRole('alert')).textContent).toContain('无法加载任务历史')
 })
