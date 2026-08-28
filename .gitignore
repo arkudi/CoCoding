@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+.Python
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# JavaScript / Vue / Vite
+node_modules/
+dist/
+.vite/
+coverage/
+*.tsbuildinfo
+
+# Environment variables and local secrets
+.env
+.env.*
+!.env.example
+
+# Local databases and runtime output
+*.db
+*.sqlite
+*.sqlite3
+*.log
+logs/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Operating system files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Build and packaging output
+build/
+*.egg-info/
