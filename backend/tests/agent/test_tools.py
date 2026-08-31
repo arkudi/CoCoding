@@ -202,7 +202,7 @@ def test_preflight_allows_quoted_shell_operators_embedded_in_non_root_targets(co
         "python -m black .",
     ],
 )
-def test_run_command_allows_non_destructive_commands_with_similar_substrings(tmp_path, command):
-    result = ToolRegistry(WorkspaceService(tmp_path)).execute(call("run_command", {"command": command}))
+def test_preflight_allows_non_destructive_leading_commands_with_similar_substrings(command, monkeypatch):
+    monkeypatch.setattr("app.agent.tools.subprocess.Popen", fail_if_command_starts)
 
-    assert result.ok is True
+    assert ToolRegistry._is_explicit_destructive_command(command) is False
