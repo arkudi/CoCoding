@@ -7,6 +7,7 @@ from unittest.mock import Mock
 from fastapi.testclient import TestClient
 
 from app.config import Settings
+from app.db.models import RunRecord, SessionRecord
 from app.main import create_app
 
 
@@ -64,3 +65,38 @@ def test_testclient_runs_database_startup_and_shutdown(tmp_path: Path) -> None:
         application.state.engine.dispose = dispose
 
     dispose.assert_called_once_with()
+
+
+def test_startup_interrupts_running_runs(tmp_path: Path) -> None:
+    database_path = tmp_path / "recovery.db"
+    application = create_app(
+        Settings(
+            database_url=sqlite_url(database_path),
+            frontend_dist=tmp_path / "missing-dist",
+        )
+    )
+
+    with TestClient(application):
+        db = application.state.session_factory()
+        session = SessionRecord(title="Workspace", workspace_path="C:/workspace")
+        db.add(session)
+        db.flush()
+        run = RunRecord(
+            session_id=session.id,
+            prompt="continue",
+            model="fake",
+            prompt_version="v1",
+            max_steps=1,
+        )
+        db.add(run)
+        db.commit()
+        run_id = run.id
+        db.close()
+
+    with TestClient(application):
+        db = application.state.session_factory()
+        recovered = db.get(RunRecord, run_id)
+        assert recovered is not None
+        assert recovered.status == "interrupted"
+        assert recovered.error_text == "Run interrupted during startup recovery."
+        db.close()

@@ -9,6 +9,7 @@ from app.api.health import router as health_router
 from app.api.sessions import router as sessions_router
 from app.config import Settings, get_settings
 from app.db.database import build_engine, build_session_factory, create_schema
+from app.db.run_repository import RunRepository
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -20,6 +21,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         create_schema(engine)
         application.state.engine = engine
         application.state.session_factory = build_session_factory(engine)
+        db = application.state.session_factory()
+        try:
+            RunRepository(db).interrupt_running_runs()
+        finally:
+            db.close()
         try:
             yield
         finally:
