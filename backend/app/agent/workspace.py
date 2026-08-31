@@ -49,6 +49,9 @@ class WorkspaceService:
         return candidate
 
     def list_files(self, path: str = ".") -> dict[str, object]:
+        requested = Path(path)
+        if any(part in IGNORED_PARTS for part in requested.parts):
+            raise WorkspaceError("PATH_IGNORED", "listing an ignored directory is not allowed")
         base = self.resolve(path)
         if not base.exists():
             raise WorkspaceError("PATH_NOT_FOUND", "directory does not exist")
@@ -103,6 +106,8 @@ class WorkspaceService:
             raise WorkspaceError("INVALID_LINE_RANGE", "line numbers must be integers")
         start = 1 if start_line is None else start_line
         end = len(lines) if end_line is None else end_line
+        if not lines and start_line is None and end_line is None:
+            return {"path": Path(path).as_posix(), "content": "", "start_line": 1, "end_line": 0}
         if start < 1 or end < start or end > len(lines):
             raise WorkspaceError("INVALID_LINE_RANGE", "line range is outside file")
         selected = "\n".join(lines[start - 1 : end])

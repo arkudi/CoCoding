@@ -94,3 +94,22 @@ def test_list_files_can_list_subdirectory(tmp_path):
     (tmp_path / "sub").mkdir()
     (tmp_path / "sub" / "a.txt").write_text("a")
     assert WorkspaceService(tmp_path).list_files("sub") == {"files": ["sub/a.txt"], "truncated": False}
+
+
+@pytest.mark.parametrize("ignored", sorted({".git", ".venv", "node_modules", "dist", "build", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", "coverage", "htmlcov"}))
+def test_list_files_rejects_ignored_directory_as_root(tmp_path, ignored):
+    ignored_root = tmp_path / ignored
+    ignored_root.mkdir()
+    (ignored_root / "secret.txt").write_text("secret", encoding="utf-8")
+    with pytest.raises(WorkspaceError, match="PATH_IGNORED"):
+        WorkspaceService(tmp_path).list_files(ignored)
+
+
+def test_read_file_allows_empty_file_with_default_range(tmp_path):
+    (tmp_path / "empty.txt").write_text("", encoding="utf-8")
+    assert WorkspaceService(tmp_path).read_file("empty.txt") == {
+        "path": "empty.txt",
+        "content": "",
+        "start_line": 1,
+        "end_line": 0,
+    }

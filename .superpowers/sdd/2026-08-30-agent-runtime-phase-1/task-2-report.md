@@ -50,3 +50,34 @@ The implementation is limited to the requested workspace service and tests. Read
 
 - Symlink behavior could not be exercised automatically on this host due to Windows permissions; the test is explicitly skipped only for that capability limitation.
 - The existing suite emits a Starlette/httpx deprecation warning unrelated to this task.
+
+## Review fix round 1
+
+### RED
+
+Added coverage for every ignored directory name as an explicit listing root and for reading an empty UTF-8 file with default line bounds.
+
+Command:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest backend/tests/agent/test_workspace_read.py -v
+```
+
+Before the fix: `12 failed, 14 passed, 1 skipped, 1 warning`. The failures were the 11 ignored-root cases (no `PATH_IGNORED` was raised) and the empty-file default read (`INVALID_LINE_RANGE`).
+
+### GREEN
+
+Command:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest backend/tests/agent/test_workspace_read.py -v
+```
+
+After the fix: `26 passed, 1 skipped, 1 warning in 0.75s`.
+
+### Fixes
+
+- `list_files` now raises `WorkspaceError("PATH_IGNORED", ...)` when any requested path component is an ignored directory name, while nested ignored directories remain filtered during normal root listings.
+- `read_file` now returns an empty result with `start_line=1` and `end_line=0` for an empty file when no range is requested.
+
+The existing symlink skip and Starlette/httpx warning remain unchanged.
