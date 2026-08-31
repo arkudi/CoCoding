@@ -120,6 +120,41 @@ def test_tool_result_persistence_is_capped_at_twenty_thousand_characters(
     assert detail.tool_calls[0].result_json == "x" * 20_000
 
 
+def test_tool_message_content_is_capped_at_twenty_thousand_characters(
+    db: Session, workspace_session: SessionRecord
+) -> None:
+    repo = RunRepository(db)
+    run = repo.create_run(
+        session_id=workspace_session.id,
+        prompt="prompt",
+        model="fake",
+        prompt_version="v1",
+        max_steps=1,
+    )
+
+    message = repo.add_message(run.id, workspace_session.id, "tool", "x" * 20_001)
+
+    assert message.content == "x" * 20_000
+
+
+@pytest.mark.parametrize("role", ["user", "assistant"])
+def test_non_tool_message_content_is_not_capped(
+    db: Session, workspace_session: SessionRecord, role: str
+) -> None:
+    repo = RunRepository(db)
+    run = repo.create_run(
+        session_id=workspace_session.id,
+        prompt="prompt",
+        model="fake",
+        prompt_version="v1",
+        max_steps=1,
+    )
+
+    message = repo.add_message(run.id, workspace_session.id, role, "x" * 20_001)
+
+    assert message.content == "x" * 20_001
+
+
 def test_completed_history_selects_newest_messages_within_budget_and_excludes_tool_messages(
     db: Session, workspace_session: SessionRecord
 ) -> None:

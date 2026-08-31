@@ -21,6 +21,10 @@ _TOOL_RESULT_CHARACTER_LIMIT = 20_000
 _STARTUP_INTERRUPTION_ERROR = "Run interrupted during startup recovery."
 
 
+def _bounded_tool_output(content: str | None) -> str | None:
+    return None if content is None else content[:_TOOL_RESULT_CHARACTER_LIMIT]
+
+
 @dataclass(frozen=True, slots=True)
 class MessageDetail:
     id: str
@@ -120,7 +124,7 @@ class RunRepository:
             run_id=run_id,
             session_id=session_id,
             role=role,
-            content=content,
+            content=_bounded_tool_output(content) if role == "tool" else content,
             tool_calls_json=tool_calls_json,
             tool_call_id=tool_call_id,
         )
@@ -155,9 +159,7 @@ class RunRepository:
     ) -> ToolCallRecord:
         record = self._require_tool_call(tool_call_id)
         record.status = status
-        record.result_json = (
-            None if result_json is None else result_json[:_TOOL_RESULT_CHARACTER_LIMIT]
-        )
+        record.result_json = _bounded_tool_output(result_json)
         record.duration_ms = duration_ms
         record.finished_at = utc_now()
         self._commit_and_refresh(record)
