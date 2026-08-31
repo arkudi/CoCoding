@@ -1,7 +1,11 @@
 """Safe, bounded access to files in a session workspace."""
 
 import os
+import difflib
+import hashlib
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 
 IGNORED_PARTS = {
@@ -26,6 +30,15 @@ class WorkspaceError(Exception):
         self.message = message
 
 
+@dataclass(frozen=True, slots=True)
+class FileChangeEvidence:
+    path: str
+    operation: Literal["created", "modified"]
+    before_hash: str | None
+    after_hash: str
+    unified_diff: str
+
+
 class WorkspaceService:
     def __init__(
         self,
@@ -36,6 +49,7 @@ class WorkspaceService:
         self.root = Path(root).resolve()
         self.max_text_bytes = max_text_bytes
         self.max_entries = max_entries
+        self._snapshots: dict[str, str | None] = {}
 
     def resolve(self, relative_path: str) -> Path:
         if not isinstance(relative_path, str) or not relative_path.strip():
@@ -112,3 +126,91 @@ class WorkspaceService:
             raise WorkspaceError("INVALID_LINE_RANGE", "line range is outside file")
         selected = "\n".join(lines[start - 1 : end])
         return {"path": Path(path).as_posix(), "content": selected, "start_line": start, "end_line": end}
+
+    def write_file(self, path: str, content: str) -> dict[str, object]:
+        file_path = self.resolve(path)
+        if not isinstance(content, str):
+            raise WorkspaceError("INVALID_UTF8", "content must be text")
+        encoded = content.encode("utf-8", errors="strict")
+        if len(encoded) > self.max_text_bytes:
+            raise WorkspaceError("FILE_TOO_LARGE", "content exceeds text byte limit")
+
+        key = file_path.relative_to(self.root).as_posix()
+        if file_path.exists() and not file_path.is_file():
+            raise WorkspaceError("PATH_NOT_FILE", "path is not a regular file")
+        before: str | None = None
+        if file_path.exists():
+            try:
+                before = file_path.read_bytes().decode("utf-8", errors="strict")
+            except UnicodeDecodeError as exc:
+                raise WorkspaceError("INVALID_UTF8", "file is not valid UTF-8") from exc
+            except OSError as exc:
+                raise WorkspaceError("WRITE_FAILED", "could not read existing file") from exc
+            if len(before.encode("utf-8")) > self.max_text_bytes:
+                raise WorkspaceError("FILE_TOO_LARGE", "file exceeds text byte limit")
+
+        parent = file_path.parent.resolve()
+        if not parent.is_relative_to(self.root):
+            raise WorkspaceError("PATH_OUTSIDE_WORKSPACE", "path escapes workspace")
+        try:
+            parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_bytes(encoded)
+        except OSError as exc:
+            raise WorkspaceError("WRITE_FAILED", "could not write file") from exc
+        if key not in self._snapshots:
+            self._snapshots[key] = before
+        return self.read_file(key)
+
+    def replace_in_file(self, path: str, old_text: str, new_text: str) -> dict[str, object]:
+        if not isinstance(old_text, str) or not isinstance(new_text, str):
+            raise WorkspaceError("INVALID_UTF8", "replacement text must be strings")
+        file_path = self.resolve(path)
+        if not file_path.exists():
+            raise WorkspaceError("PATH_NOT_FOUND", "file does not exist")
+        if not file_path.is_file():
+            raise WorkspaceError("PATH_NOT_FILE", "path is not a regular file")
+        try:
+            raw = file_path.read_bytes()
+        except OSError as exc:
+            raise WorkspaceError("READ_FAILED", "could not read file") from exc
+        if len(raw) > self.max_text_bytes:
+            raise WorkspaceError("FILE_TOO_LARGE", "file exceeds text byte limit")
+        try:
+            content = raw.decode("utf-8", errors="strict")
+        except UnicodeDecodeError as exc:
+            raise WorkspaceError("INVALID_UTF8", "file is not valid UTF-8") from exc
+        matches = content.count(old_text)
+        if matches == 0:
+            raise WorkspaceError("REPLACE_NO_MATCH", "old text was not found")
+        if matches != 1:
+            raise WorkspaceError("REPLACE_MULTIPLE_MATCHES", "old text occurs multiple times")
+        return self.write_file(path, content.replace(old_text, new_text, 1))
+
+    def changes(self) -> tuple[FileChangeEvidence, ...]:
+        result: list[FileChangeEvidence] = []
+        for key, before in sorted(self._snapshots.items()):
+            file_path = self.root / key
+            try:
+                after_bytes = file_path.read_bytes()
+                after = after_bytes.decode("utf-8", errors="strict")
+            except (OSError, UnicodeDecodeError) as exc:
+                raise WorkspaceError("READ_FAILED", "could not read changed file") from exc
+            before_bytes = None if before is None else before.encode("utf-8")
+            result.append(FileChangeEvidence(
+                path=key,
+                operation="created" if before is None else "modified",
+                before_hash=None if before_bytes is None else hashlib.sha256(before_bytes).hexdigest(),
+                after_hash=hashlib.sha256(after_bytes).hexdigest(),
+                unified_diff=self._unified_diff(key, before or "", after),
+            ))
+        return tuple(result)
+
+    def get_diff(self) -> str:
+        return "".join(change.unified_diff for change in self.changes())
+
+    @staticmethod
+    def _unified_diff(path: str, before: str, after: str) -> str:
+        return "".join(difflib.unified_diff(
+            before.splitlines(keepends=True), after.splitlines(keepends=True),
+            fromfile=f"a/{path}", tofile=f"b/{path}",
+        ))
