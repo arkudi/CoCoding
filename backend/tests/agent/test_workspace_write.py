@@ -40,6 +40,28 @@ def test_write_rejects_oversized_and_non_utf8_content(tmp_path):
     assert not (tmp_path / "large.txt").exists()
 
 
+def test_write_rejects_oversized_existing_file(tmp_path):
+    (tmp_path / "large.txt").write_bytes(b"x" * 1_048_577)
+    with pytest.raises(WorkspaceError, match="FILE_TOO_LARGE"):
+        WorkspaceService(tmp_path).write_file("large.txt", "replacement")
+
+
+def test_replace_rejects_oversized_existing_file(tmp_path):
+    (tmp_path / "large.txt").write_bytes(b"x" * 1_048_577)
+    with pytest.raises(WorkspaceError, match="FILE_TOO_LARGE"):
+        WorkspaceService(tmp_path).replace_in_file("large.txt", "x", "y")
+
+
+def test_changes_and_get_diff_reject_externally_oversized_file(tmp_path):
+    service = WorkspaceService(tmp_path)
+    service.write_file("a.txt", "small")
+    (tmp_path / "a.txt").write_bytes(b"x" * 1_048_577)
+    with pytest.raises(WorkspaceError, match="FILE_TOO_LARGE"):
+        service.changes()
+    with pytest.raises(WorkspaceError, match="FILE_TOO_LARGE"):
+        service.get_diff()
+
+
 def test_write_rejects_traversal_and_does_not_create_parent(tmp_path):
     service = WorkspaceService(tmp_path)
     with pytest.raises(WorkspaceError, match="PATH_OUTSIDE_WORKSPACE"):

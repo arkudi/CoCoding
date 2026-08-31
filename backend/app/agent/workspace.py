@@ -100,18 +100,7 @@ class WorkspaceService:
             raise WorkspaceError("PATH_NOT_FOUND", "file does not exist")
         if not file_path.is_file():
             raise WorkspaceError("PATH_NOT_FILE", "path is not a regular file")
-        try:
-            size = file_path.stat().st_size
-        except OSError as exc:
-            raise WorkspaceError("READ_FAILED", "could not stat file") from exc
-        if size > self.max_text_bytes:
-            raise WorkspaceError("FILE_TOO_LARGE", "file exceeds text byte limit")
-        try:
-            content = file_path.read_bytes().decode("utf-8", errors="strict")
-        except UnicodeDecodeError as exc:
-            raise WorkspaceError("INVALID_UTF8", "file is not valid UTF-8") from exc
-        except OSError as exc:
-            raise WorkspaceError("READ_FAILED", "could not read file") from exc
+        _, content = self._read_bounded_text(file_path)
 
         lines = content.splitlines()
         if start_line is not None and (isinstance(start_line, bool) or not isinstance(start_line, int)):
@@ -141,13 +130,11 @@ class WorkspaceService:
         before: str | None = None
         if file_path.exists():
             try:
-                before = file_path.read_bytes().decode("utf-8", errors="strict")
-            except UnicodeDecodeError as exc:
-                raise WorkspaceError("INVALID_UTF8", "file is not valid UTF-8") from exc
-            except OSError as exc:
-                raise WorkspaceError("WRITE_FAILED", "could not read existing file") from exc
-            if len(before.encode("utf-8")) > self.max_text_bytes:
-                raise WorkspaceError("FILE_TOO_LARGE", "file exceeds text byte limit")
+                _, before = self._read_bounded_text(file_path)
+            except WorkspaceError as exc:
+                if exc.code == "READ_FAILED":
+                    raise WorkspaceError("WRITE_FAILED", exc.message) from exc
+                raise
 
         parent = file_path.parent.resolve()
         if not parent.is_relative_to(self.root):
@@ -169,16 +156,7 @@ class WorkspaceService:
             raise WorkspaceError("PATH_NOT_FOUND", "file does not exist")
         if not file_path.is_file():
             raise WorkspaceError("PATH_NOT_FILE", "path is not a regular file")
-        try:
-            raw = file_path.read_bytes()
-        except OSError as exc:
-            raise WorkspaceError("READ_FAILED", "could not read file") from exc
-        if len(raw) > self.max_text_bytes:
-            raise WorkspaceError("FILE_TOO_LARGE", "file exceeds text byte limit")
-        try:
-            content = raw.decode("utf-8", errors="strict")
-        except UnicodeDecodeError as exc:
-            raise WorkspaceError("INVALID_UTF8", "file is not valid UTF-8") from exc
+        _, content = self._read_bounded_text(file_path)
         matches = content.count(old_text)
         if matches == 0:
             raise WorkspaceError("REPLACE_NO_MATCH", "old text was not found")
@@ -191,10 +169,11 @@ class WorkspaceService:
         for key, before in sorted(self._snapshots.items()):
             file_path = self.root / key
             try:
-                after_bytes = file_path.read_bytes()
-                after = after_bytes.decode("utf-8", errors="strict")
-            except (OSError, UnicodeDecodeError) as exc:
-                raise WorkspaceError("READ_FAILED", "could not read changed file") from exc
+                after_bytes, after = self._read_bounded_text(file_path)
+            except WorkspaceError as exc:
+                if exc.code == "READ_FAILED":
+                    raise WorkspaceError("READ_FAILED", "could not read changed file") from exc
+                raise
             before_bytes = None if before is None else before.encode("utf-8")
             result.append(FileChangeEvidence(
                 path=key,
@@ -207,6 +186,24 @@ class WorkspaceService:
 
     def get_diff(self) -> str:
         return "".join(change.unified_diff for change in self.changes())
+
+    def _read_bounded_text(self, file_path: Path) -> tuple[bytes, str]:
+        try:
+            size = file_path.stat().st_size
+        except OSError as exc:
+            raise WorkspaceError("READ_FAILED", "could not stat file") from exc
+        if size > self.max_text_bytes:
+            raise WorkspaceError("FILE_TOO_LARGE", "file exceeds text byte limit")
+        try:
+            raw = file_path.read_bytes()
+        except OSError as exc:
+            raise WorkspaceError("READ_FAILED", "could not read file") from exc
+        if len(raw) > self.max_text_bytes:
+            raise WorkspaceError("FILE_TOO_LARGE", "file exceeds text byte limit")
+        try:
+            return raw, raw.decode("utf-8", errors="strict")
+        except UnicodeDecodeError as exc:
+            raise WorkspaceError("INVALID_UTF8", "file is not valid UTF-8") from exc
 
     @staticmethod
     def _unified_diff(path: str, before: str, after: str) -> str:
