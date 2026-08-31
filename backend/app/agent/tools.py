@@ -20,7 +20,6 @@ from app.agent.workspace import WorkspaceError, WorkspaceService
 logger = logging.getLogger(__name__)
 
 _MAX_COMMAND_OUTPUT_CHARS = 20_000
-_COMMAND_TOKEN = re.compile(r'''(?:"[^"]*"|'[^']*'|&&|\|\||[;|&]|[^\s;|&]+)''')
 _COMMAND_OPERATORS = frozenset({";", "&&", "||", "|", "&"})
 
 
@@ -215,7 +214,7 @@ class ToolRegistry:
 
     @staticmethod
     def _is_explicit_destructive_command(command: str) -> bool:
-        tokens = [token.strip("\"'").casefold() for token in _COMMAND_TOKEN.findall(command.strip())]
+        tokens = [token.casefold() for token in ToolRegistry._tokenize_command(command)]
         segment: list[str] = []
         for token in tokens:
             if token in _COMMAND_OPERATORS:
@@ -225,6 +224,44 @@ class ToolRegistry:
             else:
                 segment.append(token)
         return ToolRegistry._is_explicit_destructive_segment(segment)
+
+    @staticmethod
+    def _tokenize_command(command: str) -> list[str]:
+        """Split focused shell syntax while preserving separators inside quotes."""
+        tokens: list[str] = []
+        word: list[str] = []
+        quote: str | None = None
+        index = 0
+        while index < len(command):
+            character = command[index]
+            if quote is not None:
+                if character == quote:
+                    quote = None
+                else:
+                    word.append(character)
+                index += 1
+                continue
+            if character in {"\"", "'"}:
+                quote = character
+            elif character.isspace():
+                if word:
+                    tokens.append("".join(word))
+                    word = []
+            elif character in {";", "|", "&"}:
+                if word:
+                    tokens.append("".join(word))
+                    word = []
+                if character in {"|", "&"} and index + 1 < len(command) and command[index + 1] == character:
+                    tokens.append(character * 2)
+                    index += 1
+                else:
+                    tokens.append(character)
+            else:
+                word.append(character)
+            index += 1
+        if word:
+            tokens.append("".join(word))
+        return tokens
 
     @staticmethod
     def _is_explicit_destructive_segment(tokens: list[str]) -> bool:

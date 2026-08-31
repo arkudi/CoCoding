@@ -181,6 +181,22 @@ def test_run_command_rejects_root_deletion_when_followed_by_attached_shell_separ
 @pytest.mark.parametrize(
     "command",
     [
+        'rm -rf /";"safe',
+        'rm -rf /"&&"safe',
+        'rm -rf /"||"safe',
+        'rm -rf /"|"safe',
+        'rm -rf /"&"safe',
+    ],
+)
+def test_preflight_allows_quoted_shell_operators_embedded_in_non_root_targets(command, monkeypatch):
+    monkeypatch.setattr("app.agent.tools.subprocess.Popen", fail_if_command_starts)
+
+    assert ToolRegistry._is_explicit_destructive_command(command) is False
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
         "ruff format backend",
         "echo rm -rf /",
         "python -m black .",
