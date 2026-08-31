@@ -221,3 +221,39 @@ def test_loop_uses_bounded_user_and_assistant_history_only(run_context):
         {"role": "assistant", "content": "keep this"},
         {"role": "user", "content": "current"},
     ]
+
+
+def test_loop_uses_one_valid_bounded_payload_for_oversized_tool_result(run_context, monkeypatch):
+    oversized = ToolResult(True, {"content": "x" * 1_048_576}, None, 1)
+    monkeypatch.setattr(run_context.registry, "execute", lambda call: oversized)
+    model = ScriptedModelClient([
+        AssistantTurn(None, (execute("read_file", {"path": "large.txt"}, "c1"),)),
+        AssistantTurn("Handled the result."),
+    ])
+    loop = AgentLoop(model, run_context.registry, run_context.repository, run_context.workspace)
+
+    loop.run(run_id=run_context.run.id, session_id=run_context.session.id, prompt="inspect", prior_messages=[], max_steps=20)
+
+    detail = run_context.repository.get_run_detail(run_context.run.id)
+    persisted = detail.tool_calls[0].result_json
+    persisted_message = next(message.content for message in detail.messages if message.role == "tool")
+    model_content = model.calls[1]["messages"][-1]["content"]
+    assert len(persisted) <= 20_000
+    assert json.loads(persisted)["meta"]["truncated"] is True
+    assert persisted == persisted_message == model_content
+
+
+def test_loop_preserves_non_oversized_tool_payload_exactly(run_context, monkeypatch):
+    result = ToolResult(True, {"content": "small"}, None, 1)
+    monkeypatch.setattr(run_context.registry, "execute", lambda call: result)
+    model = ScriptedModelClient([
+        AssistantTurn(None, (execute("read_file", {"path": "small.txt"}, "c1"),)),
+        AssistantTurn("Handled the result."),
+    ])
+    loop = AgentLoop(model, run_context.registry, run_context.repository, run_context.workspace)
+
+    loop.run(run_id=run_context.run.id, session_id=run_context.session.id, prompt="inspect", prior_messages=[], max_steps=20)
+
+    persisted = run_context.repository.get_run_detail(run_context.run.id).tool_calls[0].result_json
+    assert persisted == result.to_json()
+    assert model.calls[1]["messages"][-1]["content"] == result.to_json()

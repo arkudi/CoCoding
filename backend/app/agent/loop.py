@@ -21,6 +21,7 @@ _CANCELLED_ERROR = "The run was cancelled."
 _PROVIDER_ERROR = "The model provider request failed."
 _TOOL_ERROR = "The tool could not be executed."
 _PRIOR_HISTORY_CHARACTER_LIMIT = 40_000
+_TOOL_PAYLOAD_CHARACTER_LIMIT = 20_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,17 +104,18 @@ class AgentLoop:
                     run_id, call.id, call.name, call.arguments_json
                 )
                 result = self._execute_tool(call)
+                payload = self._tool_payload(result)
                 self._repository.finish_tool_call(
                     tool_call.id,
                     "succeeded" if result.ok else "failed",
-                    result.to_json(),
+                    payload,
                     result.duration_ms,
                 )
                 self._repository.add_message(
-                    run_id, session_id, "tool", result.to_json(), tool_call_id=call.id
+                    run_id, session_id, "tool", payload, tool_call_id=call.id
                 )
                 messages.append(
-                    {"role": "tool", "tool_call_id": call.id, "content": result.to_json()}
+                    {"role": "tool", "tool_call_id": call.id, "content": payload}
                 )
 
         return self._finish(run_id, step_count, "max_steps", None, _MAX_STEPS_ERROR)
@@ -170,6 +172,47 @@ class AgentLoop:
             return self._registry.execute(call)
         except Exception:
             return ToolResult(False, None, ToolError("TOOL_EXECUTION_ERROR", _TOOL_ERROR), 0)
+
+    @staticmethod
+    def _tool_payload(result: ToolResult) -> str:
+        serialized = result.to_json()
+        if len(serialized) <= _TOOL_PAYLOAD_CHARACTER_LIMIT:
+            return serialized
+
+        error = None
+        if result.error is not None:
+            error = {
+                "code": result.error.code[:256],
+                "message": result.error.message[:256],
+            }
+
+        def encode(prefix: str) -> str:
+            return json.dumps(
+                {
+                    "ok": result.ok,
+                    "error": error,
+                    "meta": {
+                        "duration_ms": result.duration_ms,
+                        "truncated": True,
+                        "original_length": len(serialized),
+                    },
+                    "result_prefix": prefix,
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+
+        low, high = 0, len(serialized)
+        payload = encode("")
+        while low <= high:
+            midpoint = (low + high) // 2
+            candidate = encode(serialized[:midpoint])
+            if len(candidate) <= _TOOL_PAYLOAD_CHARACTER_LIMIT:
+                payload = candidate
+                low = midpoint + 1
+            else:
+                high = midpoint - 1
+        return payload
 
     @classmethod
     def _assistant_message(cls, turn: AssistantTurn) -> dict[str, object]:
