@@ -5,6 +5,28 @@ import pytest
 from app.agent.provider import DeepSeekClient, ModelProtocolError
 
 
+def test_from_settings_disables_sdk_retries(monkeypatch):
+    """Allowing SDK retries would exceed the adapter's three-attempt contract."""
+    import app.agent.provider as provider
+
+    captured = {}
+
+    class OpenAIStub:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(provider, "OpenAI", OpenAIStub)
+    settings = SimpleNamespace(
+        deepseek_api_key="test-key",
+        deepseek_base_url="https://api.deepseek.com",
+        deepseek_model="deepseek-v4-flash",
+    )
+
+    DeepSeekClient.from_settings(settings)
+
+    assert captured["max_retries"] == 0
+
+
 def test_complete_disables_thinking_and_converts_tool_calls():
     """Removing native function-tool arguments from a response must fail this test."""
     captured = {}
