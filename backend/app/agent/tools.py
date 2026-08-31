@@ -20,7 +20,8 @@ from app.agent.workspace import WorkspaceError, WorkspaceService
 logger = logging.getLogger(__name__)
 
 _MAX_COMMAND_OUTPUT_CHARS = 20_000
-_COMMAND_TOKEN = re.compile(r'''(?:"[^"]*"|'[^']*'|\S+)''')
+_COMMAND_TOKEN = re.compile(r'''(?:"[^"]*"|'[^']*'|&&|\|\||[;|&]|[^\s;|&]+)''')
+_COMMAND_OPERATORS = frozenset({";", "&&", "||", "|", "&"})
 
 
 class StrictArgs(BaseModel):
@@ -215,6 +216,18 @@ class ToolRegistry:
     @staticmethod
     def _is_explicit_destructive_command(command: str) -> bool:
         tokens = [token.strip("\"'").casefold() for token in _COMMAND_TOKEN.findall(command.strip())]
+        segment: list[str] = []
+        for token in tokens:
+            if token in _COMMAND_OPERATORS:
+                if ToolRegistry._is_explicit_destructive_segment(segment):
+                    return True
+                segment = []
+            else:
+                segment.append(token)
+        return ToolRegistry._is_explicit_destructive_segment(segment)
+
+    @staticmethod
+    def _is_explicit_destructive_segment(tokens: list[str]) -> bool:
         if not tokens:
             return False
         leading = tokens[0]

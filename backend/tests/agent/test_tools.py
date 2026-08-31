@@ -12,6 +12,10 @@ def call(name: str, arguments: object, call_id: str = "call-1") -> ToolCall:
     return ToolCall(id=call_id, name=name, arguments_json=json.dumps(arguments))
 
 
+def fail_if_command_starts(*args, **kwargs):
+    raise AssertionError("destructive command reached subprocess.Popen")
+
+
 def test_execute_rejects_malformed_arguments_without_raising(tmp_path):
     result = ToolRegistry(WorkspaceService(tmp_path)).execute(
         ToolCall(id="c1", name="read_file", arguments_json="{")
@@ -143,7 +147,30 @@ def test_run_command_rejects_empty_command(tmp_path):
         "shutdown",
     ],
 )
-def test_run_command_rejects_explicit_destructive_system_commands(tmp_path, command):
+def test_run_command_rejects_explicit_destructive_system_commands(tmp_path, command, monkeypatch):
+    monkeypatch.setattr("app.agent.tools.subprocess.Popen", fail_if_command_starts)
+    result = ToolRegistry(WorkspaceService(tmp_path)).execute(call("run_command", {"command": command}))
+
+    assert result.ok is False
+    assert result.error is not None
+    assert result.error.code == "DESTRUCTIVE_COMMAND"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "rm -rf /; echo safe",
+        "rm -rf /&& echo safe",
+        "rm -rf /|| echo safe",
+        "rm -rf /| cat",
+        r"Remove-Item -Recurse C:\; Write-Output safe",
+        r"del /s /q C:\& echo safe",
+    ],
+)
+def test_run_command_rejects_root_deletion_when_followed_by_attached_shell_separator(
+    tmp_path, command, monkeypatch
+):
+    monkeypatch.setattr("app.agent.tools.subprocess.Popen", fail_if_command_starts)
     result = ToolRegistry(WorkspaceService(tmp_path)).execute(call("run_command", {"command": command}))
 
     assert result.ok is False
