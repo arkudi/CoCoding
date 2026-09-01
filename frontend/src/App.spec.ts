@@ -29,6 +29,7 @@ test('creates a session and shows it in history', async () => {
       updated_at: '2026-08-28T10:00:00Z',
     }), { status: 201 }))
     .mockResolvedValueOnce(new Response(JSON.stringify([]), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ files: [], truncated: false }), { status: 200 }))
   vi.stubGlobal('fetch', fetchMock)
 
   render(App, { global: { plugins: [createPinia()] } })
