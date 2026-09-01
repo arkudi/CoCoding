@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from app.api.health import router as health_router
 from app.api.sessions import router as sessions_router
 from app.api.runs import router as runs_router
+from app.api.workspace import router as workspace_router
 from app.agent.provider import DeepSeekClient
 from app.agent.events import RunEventHub
 from app.agent.run_manager import RunManager
@@ -51,6 +52,7 @@ def create_app(
     app.include_router(health_router, prefix="/api")
     app.include_router(sessions_router, prefix="/api")
     app.include_router(runs_router, prefix="/api")
+    app.include_router(workspace_router, prefix="/api")
 
     assets = resolved.frontend_dist / "assets"
     if assets.is_dir():

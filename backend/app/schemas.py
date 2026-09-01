@@ -125,3 +125,14 @@ class RunEventRead(BaseModel):
     run_id: str
     occurred_at: datetime
     data: object
+
+
+class WorkspaceFilesRead(BaseModel):
+    files: tuple[str, ...]
+    truncated: bool
+
+
+class WorkspaceFileRead(BaseModel):
+    path: str
+    content: str
+    size: int = Field(ge=0)
