@@ -312,12 +312,12 @@ def test_post_loop_repository_failure_is_terminalized_by_service_boundary(
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     original_get_detail = RunRepository.get_run_detail
-    failed_once = False
+    detail_load_count = 0
 
     def fail_first_detail_load(self, run_id):
-        nonlocal failed_once
-        if not failed_once:
-            failed_once = True
+        nonlocal detail_load_count
+        detail_load_count += 1
+        if detail_load_count == 3:
             raise RuntimeError("raw detail-load failure")
         return original_get_detail(self, run_id)
 

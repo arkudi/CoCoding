@@ -182,9 +182,10 @@ class AgentLoop:
             final_response=final_response,
             error_text=error_text,
         )
-        detail = self._repository.get_run_detail(run_id)
-        if detail is not None:
-            self._emit("run.finished", run_id, asdict(detail))
+        if self._event_sink is not None:
+            detail = self._repository.get_run_detail(run_id)
+            if detail is not None:
+                self._emit("run.finished", run_id, asdict(detail))
         return AgentRunResult(status, step_count, final_response, error_text)
 
     def _persist_assistant(self, run_id: str, session_id: str, turn: AssistantTurn) -> None:
