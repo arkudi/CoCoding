@@ -2,7 +2,8 @@ import { defineStore } from 'pinia'
 import * as api from '@/api/runs'
 import { useSessionsStore } from './sessions'
 import type {
-  FileChange, Run, RunCreate, RunEvent, RunMessage, RunStatus, ToolCall,
+  AssistantDeltaData, AssistantDraft, FileChange, Run, RunCreate, RunEvent,
+  RunMessage, RunStatus, ToolCall,
 } from '@/types/run'
 
 type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'retrying'
@@ -22,6 +23,7 @@ export const useRunsStore = defineStore('runs', {
   state: () => ({
     history_by_session: {} as Record<string, Run[]>,
     details: {} as Record<string, Run>,
+    draft_by_run: {} as Record<string, AssistantDraft>,
     selected_id: null as string | null,
     loading: false,
     error: null as string | null,
@@ -36,6 +38,9 @@ export const useRunsStore = defineStore('runs', {
     selected(state): Run | null {
       return state.selected_id ? state.details[state.selected_id] ?? null : null
     },
+    selected_draft(state): AssistantDraft | null {
+      return state.selected_id ? state.draft_by_run[state.selected_id] ?? null : null
+    },
   },
   actions: {
     async loadHistory(sessionId: string) {
@@ -46,7 +51,10 @@ export const useRunsStore = defineStore('runs', {
         this.history_by_session[sessionId] = items
         for (const item of items) this.details[item.id] = item
         if (items.length > 0) this.selectRun(items[0].id)
-        else this.selected_id = null
+        else {
+          this.disconnect()
+          this.selected_id = null
+        }
       } catch (error) {
         this.error = error instanceof Error ? error.message : '加载运行记录失败'
       } finally {
@@ -91,7 +99,23 @@ export const useRunsStore = defineStore('runs', {
       if (event.run_id !== this.selected_id) return
       const run = this.details[event.run_id]
       if (!run) return
-      if (event.type === 'run.snapshot') {
+      if (event.type === 'assistant.started') {
+        this.draft_by_run[event.run_id] = { text: '', active: true }
+      } else if (event.type === 'assistant.delta') {
+        const data = event.data as Partial<AssistantDeltaData> | null
+        if (!data || typeof data.delta !== 'string') {
+          this.error = '实时事件格式无效'
+          return
+        }
+        const draft = this.draft_by_run[event.run_id] ?? { text: '', active: true }
+        this.draft_by_run[event.run_id] = {
+          text: draft.text + data.delta,
+          active: true,
+        }
+      } else if (event.type === 'assistant.finished') {
+        const draft = this.draft_by_run[event.run_id]
+        if (draft) this.draft_by_run[event.run_id] = { ...draft, active: false }
+      } else if (event.type === 'run.snapshot') {
         this.replaceRun(event.data as Run)
       } else if (event.type === 'message.created') {
         run.messages = upsert(run.messages, event.data as RunMessage)
@@ -116,6 +140,7 @@ export const useRunsStore = defineStore('runs', {
       }
     },
     replaceRun(run: Run) {
+      delete this.draft_by_run[run.id]
       this.details[run.id] = run
       this.history_by_session[run.session_id] = upsert(
         this.history_by_session[run.session_id] ?? [], run,
@@ -148,6 +173,7 @@ export const useRunsStore = defineStore('runs', {
       }
     },
     disconnect() {
+      if (this.selected_id) delete this.draft_by_run[this.selected_id]
       this.generation += 1
       if (this.reconnect_timer !== null) clearTimeout(this.reconnect_timer)
       this.reconnect_timer = null
