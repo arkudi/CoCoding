@@ -56,7 +56,7 @@ Set-Location frontend
 npm run build
 
 Set-Location ..
-python -m uvicorn app.main:app --app-dir backend
+python -m uvicorn app.main:app --app-dir backend --workers 1
 ```
 
 After the build, FastAPI serves the frontend from `frontend/dist` at `http://127.0.0.1:8000`, including built assets. If no build is present, the root route returns an API hint instead.
