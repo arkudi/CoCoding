@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from pathlib import Path
 
@@ -16,6 +17,9 @@ from app.db.run_repository import RunDetail, RunRepository
 
 
 _PROMPT_VERSION = "coding_agent_v1"
+_INTERNAL_ERROR = "The run failed because of an internal error."
+
+logger = logging.getLogger(__name__)
 
 
 class AgentBusyError(Exception):
@@ -55,6 +59,7 @@ class AgentService:
 
                 repository = RunRepository(db)
                 prior_messages = repository.completed_history(session_id)
+                workspace = WorkspaceService(workspace_path)
                 run = repository.create_run(
                     session_id=session_id,
                     prompt=prompt,
@@ -62,17 +67,28 @@ class AgentService:
                     prompt_version=_PROMPT_VERSION,
                     max_steps=max_steps,
                 )
-                workspace = WorkspaceService(workspace_path)
-                loop = AgentLoop(self.model_client, ToolRegistry(workspace), repository, workspace)
-                loop.run(
-                    run_id=run.id,
-                    session_id=session_id,
-                    prompt=prompt,
-                    prior_messages=prior_messages,
-                    max_steps=max_steps,
-                    cancellation=CancellationToken(),
-                )
-                detail = repository.get_run_detail(run.id)
+                step_count = 0
+                try:
+                    loop = AgentLoop(
+                        self.model_client,
+                        ToolRegistry(workspace),
+                        repository,
+                        workspace,
+                    )
+                    result = loop.run(
+                        run_id=run.id,
+                        session_id=session_id,
+                        prompt=prompt,
+                        prior_messages=prior_messages,
+                        max_steps=max_steps,
+                        cancellation=CancellationToken(),
+                    )
+                    step_count = result.step_count
+                    detail = repository.get_run_detail(run.id)
+                except Exception as error:
+                    detail = self._recover_created_run(
+                        repository, workspace, run.id, step_count, error
+                    )
                 if detail is None:  # pragma: no cover - database contract guard
                     raise RuntimeError("Run detail was not persisted")
                 return detail
@@ -87,3 +103,42 @@ class AgentService:
         if isinstance(configured_name, str) and configured_name:
             return configured_name
         return type(self.model_client).__name__
+
+    @staticmethod
+    def _recover_created_run(
+        repository: RunRepository,
+        workspace: WorkspaceService,
+        run_id: str,
+        step_count: int,
+        error: Exception,
+    ) -> RunDetail | None:
+        logger.exception(
+            "Unexpected failure after run creation (type=%s)",
+            type(error).__name__,
+        )
+        repository.db.rollback()
+
+        try:
+            repository.replace_file_changes(run_id, workspace.changes())
+        except Exception as evidence_error:
+            logger.exception(
+                "Could not persist final run evidence (type=%s)",
+                type(evidence_error).__name__,
+            )
+            repository.db.rollback()
+
+        try:
+            repository.finish_run(
+                run_id,
+                "failed",
+                step_count=step_count,
+                error_text=_INTERNAL_ERROR,
+            )
+        except Exception as finish_error:
+            logger.exception(
+                "Could not persist failed run state (type=%s)",
+                type(finish_error).__name__,
+            )
+            repository.db.rollback()
+
+        return repository.get_run_detail(run_id)

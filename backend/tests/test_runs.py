@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 
 from app.agent.types import AssistantTurn, ToolCall
+from app.agent.workspace import WorkspaceService
 from app.config import Settings
 from app.db.models import RunRecord
 from app.db.run_repository import RunRepository
@@ -69,6 +70,44 @@ def test_submit_run_and_reload_complete_evidence(app_factory, tmp_path: Path) ->
         timestamp = datetime.fromisoformat(evidence[field].replace("Z", "+00:00"))
         assert timestamp.utcoffset() == timedelta(0)
     assert (workspace / "a.txt").read_text(encoding="utf-8") == "new\n"
+
+
+def test_second_run_replays_only_completed_user_and_terminal_assistant_messages(
+    app_factory, tmp_path: Path
+) -> None:
+    """Replaying an intermediate tool-request turn would orphan its tool calls."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "a.txt").write_text("hello", encoding="utf-8")
+    model = ScriptedModelClient(
+        [
+            AssistantTurn(
+                None,
+                (ToolCall("read-1", "read_file", '{"path":"a.txt"}'),),
+            ),
+            AssistantTurn("The first run inspected a.txt."),
+            AssistantTurn("The second run is complete."),
+        ]
+    )
+
+    with app_factory(model) as client:
+        session = _create_session(client, workspace)
+        first = client.post(
+            f"/api/sessions/{session['id']}/runs",
+            json={"prompt": "Inspect a.txt."},
+        )
+        second = client.post(
+            f"/api/sessions/{session['id']}/runs",
+            json={"prompt": "Use the prior result."},
+        )
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert model.calls[2]["messages"][1:] == [
+        {"role": "user", "content": "Inspect a.txt."},
+        {"role": "assistant", "content": "The first run inspected a.txt."},
+        {"role": "user", "content": "Use the prior result."},
+    ]
 
 
 def test_run_endpoint_returns_404_for_missing_session_and_run(app_factory, tmp_path: Path) -> None:
@@ -207,3 +246,91 @@ def test_provider_failures_are_safe_and_do_not_expose_exception_text(app_factory
     assert response.json()["status"] == "failed"
     assert response.json()["error_text"] == "The model provider request failed."
     assert "provider secret" not in response.text
+
+
+def test_message_persistence_failure_marks_created_run_failed_with_safe_error(
+    app_factory, tmp_path: Path, monkeypatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    original_add_message = RunRepository.add_message
+    failed_once = False
+
+    def fail_first_message(self, *args, **kwargs):
+        nonlocal failed_once
+        if not failed_once:
+            failed_once = True
+            raise RuntimeError("raw persistence detail")
+        return original_add_message(self, *args, **kwargs)
+
+    monkeypatch.setattr(RunRepository, "add_message", fail_first_message)
+
+    with app_factory(ScriptedModelClient([AssistantTurn("Unused.")])) as client:
+        session = _create_session(client, workspace)
+        response = client.post(
+            f"/api/sessions/{session['id']}/runs",
+            json={"prompt": "Update it."},
+        )
+        reloaded = client.get(f"/api/runs/{response.json()['id']}")
+
+    assert response.status_code == 201
+    assert response.json()["status"] == "failed"
+    assert response.json()["error_text"] == "The run failed because of an internal error."
+    assert reloaded.json()["error_text"] == response.json()["error_text"]
+    assert "raw persistence detail" not in response.text
+
+
+def test_file_change_generation_failure_still_marks_created_run_failed(
+    app_factory, tmp_path: Path, monkeypatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    def fail_changes(self):
+        raise RuntimeError("raw evidence detail")
+
+    monkeypatch.setattr(WorkspaceService, "changes", fail_changes)
+
+    with app_factory(ScriptedModelClient([AssistantTurn("Finished.")])) as client:
+        session = _create_session(client, workspace)
+        response = client.post(
+            f"/api/sessions/{session['id']}/runs",
+            json={"prompt": "Update it."},
+        )
+        reloaded = client.get(f"/api/runs/{response.json()['id']}")
+
+    assert response.status_code == 201
+    assert response.json()["status"] == "failed"
+    assert response.json()["error_text"] == "The run failed because of an internal error."
+    assert reloaded.json()["error_text"] == response.json()["error_text"]
+    assert "raw evidence detail" not in response.text
+
+
+def test_post_loop_repository_failure_is_terminalized_by_service_boundary(
+    app_factory, tmp_path: Path, monkeypatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    original_get_detail = RunRepository.get_run_detail
+    failed_once = False
+
+    def fail_first_detail_load(self, run_id):
+        nonlocal failed_once
+        if not failed_once:
+            failed_once = True
+            raise RuntimeError("raw detail-load failure")
+        return original_get_detail(self, run_id)
+
+    monkeypatch.setattr(RunRepository, "get_run_detail", fail_first_detail_load)
+
+    with app_factory(ScriptedModelClient([AssistantTurn("Finished.")])) as client:
+        session = _create_session(client, workspace)
+        response = client.post(
+            f"/api/sessions/{session['id']}/runs",
+            json={"prompt": "Update it."},
+        )
+
+    assert response.status_code == 201
+    assert response.json()["status"] == "failed"
+    assert response.json()["error_text"] == "The run failed because of an internal error."
+    assert "raw detail-load failure" not in response.text

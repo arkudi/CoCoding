@@ -78,6 +78,37 @@ def test_repository_persists_complete_run_evidence(
         detail.status = "failed"  # type: ignore[misc]
 
 
+def test_each_mutation_helper_leaves_no_open_database_transaction(
+    db: Session, workspace_session: SessionRecord
+) -> None:
+    """A post-commit refresh must not hold a transaction across external work."""
+    repo = RunRepository(db)
+
+    run = repo.create_run(
+        session_id=workspace_session.id,
+        prompt="change it",
+        model="fake",
+        prompt_version="coding_agent_v1",
+        max_steps=20,
+    )
+    assert db.in_transaction() is False
+
+    repo.add_message(run.id, workspace_session.id, "user", "change it")
+    assert db.in_transaction() is False
+
+    call = repo.start_tool_call(run.id, "provider-1", "read_file", "{}")
+    assert db.in_transaction() is False
+
+    repo.finish_tool_call(call.id, "succeeded", '{"ok":true}', 1)
+    assert db.in_transaction() is False
+
+    repo.replace_file_changes(run.id, ())
+    assert db.in_transaction() is False
+
+    repo.finish_run(run.id, "completed", step_count=1, final_response="done")
+    assert db.in_transaction() is False
+
+
 @pytest.mark.parametrize(
     "status", ["completed", "failed", "max_steps", "cancelled", "interrupted"]
 )

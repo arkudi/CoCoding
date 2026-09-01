@@ -239,7 +239,13 @@ def test_loop_uses_one_valid_bounded_payload_for_oversized_tool_result(run_conte
     persisted_message = next(message.content for message in detail.messages if message.role == "tool")
     model_content = model.calls[1]["messages"][-1]["content"]
     assert len(persisted) <= 20_000
-    assert json.loads(persisted)["meta"]["truncated"] is True
+    envelope = json.loads(persisted)
+    assert set(envelope) == {"ok", "data", "error", "meta"}
+    assert set(envelope["data"]) == {"result_prefix", "original_length"}
+    assert envelope["data"]["original_length"] == len(oversized.to_json())
+    prefix = envelope["data"]["result_prefix"]
+    assert prefix == oversized.to_json()[: len(prefix)]
+    assert envelope["meta"] == {"duration_ms": 1, "truncated": True}
     assert persisted == persisted_message == model_content
 
 
@@ -255,5 +261,6 @@ def test_loop_preserves_non_oversized_tool_payload_exactly(run_context, monkeypa
     loop.run(run_id=run_context.run.id, session_id=run_context.session.id, prompt="inspect", prior_messages=[], max_steps=20)
 
     persisted = run_context.repository.get_run_detail(run_context.run.id).tool_calls[0].result_json
+    assert set(json.loads(persisted)) == {"ok", "data", "error", "meta"}
     assert persisted == result.to_json()
     assert model.calls[1]["messages"][-1]["content"] == result.to_json()

@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
 from app.agent.workspace import FileChangeEvidence
@@ -105,7 +105,7 @@ class RunRepository:
             max_steps=max_steps,
         )
         self.db.add(record)
-        self._commit_and_refresh(record)
+        self._flush_refresh_and_commit(record)
         return record
 
     def add_message(
@@ -129,7 +129,7 @@ class RunRepository:
             tool_call_id=tool_call_id,
         )
         self.db.add(record)
-        self._commit_and_refresh(record)
+        self._flush_refresh_and_commit(record)
         return record
 
     def start_tool_call(
@@ -147,7 +147,7 @@ class RunRepository:
             arguments_json=arguments_json,
         )
         self.db.add(record)
-        self._commit_and_refresh(record)
+        self._flush_refresh_and_commit(record)
         return record
 
     def finish_tool_call(
@@ -162,7 +162,7 @@ class RunRepository:
         record.result_json = _bounded_tool_output(result_json)
         record.duration_ms = duration_ms
         record.finished_at = utc_now()
-        self._commit_and_refresh(record)
+        self._flush_refresh_and_commit(record)
         return record
 
     def finish_run(
@@ -184,7 +184,7 @@ class RunRepository:
         now = utc_now()
         record.updated_at = now
         record.finished_at = now
-        self._commit_and_refresh(record)
+        self._flush_refresh_and_commit(record)
         return record
 
     def replace_file_changes(
@@ -204,9 +204,10 @@ class RunRepository:
             for change in changes
         )
         self.db.add_all(records)
-        self.db.commit()
+        self.db.flush()
         for record in records:
             self.db.refresh(record)
+        self.db.commit()
         return records
 
     def get_run_detail(self, run_id: str) -> RunDetail | None:
@@ -267,6 +268,9 @@ class RunRepository:
                 RunRecord.status == "completed",
                 MessageRecord.session_id == session_id,
                 MessageRecord.role.in_(("user", "assistant")),
+                MessageRecord.tool_calls_json.is_(None),
+                MessageRecord.content.is_not(None),
+                func.trim(MessageRecord.content) != "",
             )
             .order_by(MessageRecord.created_at.desc(), MessageRecord.id.desc())
         )
@@ -314,9 +318,10 @@ class RunRepository:
             raise ValueError("Tool call not found")
         return record
 
-    def _commit_and_refresh(self, record: object) -> None:
-        self.db.commit()
+    def _flush_refresh_and_commit(self, record: object) -> None:
+        self.db.flush()
         self.db.refresh(record)
+        self.db.commit()
 
     @staticmethod
     def _message_detail(record: MessageRecord) -> MessageDetail:

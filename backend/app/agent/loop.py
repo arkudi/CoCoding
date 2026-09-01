@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 from dataclasses import dataclass
 from typing import Literal
@@ -20,8 +21,11 @@ _MAX_STEPS_ERROR = "The run reached its model-turn limit."
 _CANCELLED_ERROR = "The run was cancelled."
 _PROVIDER_ERROR = "The model provider request failed."
 _TOOL_ERROR = "The tool could not be executed."
+_INTERNAL_ERROR = "The run failed because of an internal error."
 _PRIOR_HISTORY_CHARACTER_LIMIT = 40_000
 _TOOL_PAYLOAD_CHARACTER_LIMIT = 20_000
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,8 +60,32 @@ class AgentLoop:
         self._registry = registry
         self._repository = repository
         self._workspace = workspace or registry._workspace
+        self._current_step_count = 0
 
     def run(
+        self,
+        *,
+        run_id: str,
+        session_id: str,
+        prompt: str,
+        prior_messages: list[dict[str, object]],
+        max_steps: int,
+        cancellation: CancellationToken | None = None,
+    ) -> AgentRunResult:
+        self._current_step_count = 0
+        try:
+            return self._run(
+                run_id=run_id,
+                session_id=session_id,
+                prompt=prompt,
+                prior_messages=prior_messages,
+                max_steps=max_steps,
+                cancellation=cancellation,
+            )
+        except Exception as error:
+            return self._recover_unexpected_failure(run_id, error)
+
+    def _run(
         self,
         *,
         run_id: str,
@@ -80,8 +108,10 @@ class AgentLoop:
         step_count = 0
 
         for step_count in range(1, max_steps + 1):
+            self._current_step_count = step_count
             if token.is_cancelled:
                 return self._finish(run_id, step_count - 1, "cancelled", None, _CANCELLED_ERROR)
+            self._assert_no_database_transaction()
             try:
                 turn = self._model.complete(messages, self._registry.schemas())
             except ModelProviderError as error:
@@ -168,10 +198,61 @@ class AgentLoop:
         return selected
 
     def _execute_tool(self, call: ToolCall) -> ToolResult:
+        self._assert_no_database_transaction()
         try:
             return self._registry.execute(call)
         except Exception:
             return ToolResult(False, None, ToolError("TOOL_EXECUTION_ERROR", _TOOL_ERROR), 0)
+
+    def _recover_unexpected_failure(
+        self, run_id: str, error: Exception
+    ) -> AgentRunResult:
+        logger.exception(
+            "Unexpected agent run failure (type=%s)",
+            type(error).__name__,
+        )
+        self._rollback_repository()
+
+        try:
+            changes = self._workspace.changes()
+            self._repository.replace_file_changes(run_id, changes)
+        except Exception as evidence_error:
+            logger.exception(
+                "Could not persist final run evidence (type=%s)",
+                type(evidence_error).__name__,
+            )
+            self._rollback_repository()
+
+        try:
+            self._repository.finish_run(
+                run_id,
+                "failed",
+                step_count=self._current_step_count,
+                error_text=_INTERNAL_ERROR,
+            )
+        except Exception as finish_error:
+            logger.exception(
+                "Could not persist failed run state (type=%s)",
+                type(finish_error).__name__,
+            )
+            self._rollback_repository()
+
+        return AgentRunResult(
+            "failed", self._current_step_count, None, _INTERNAL_ERROR
+        )
+
+    def _rollback_repository(self) -> None:
+        try:
+            self._repository.db.rollback()
+        except Exception as rollback_error:  # pragma: no cover - defensive logging only
+            logger.exception(
+                "Could not roll back failed run transaction (type=%s)",
+                type(rollback_error).__name__,
+            )
+
+    def _assert_no_database_transaction(self) -> None:
+        if self._repository.db.in_transaction():
+            raise RuntimeError("Database transaction remained open across external agent work.")
 
     @staticmethod
     def _tool_payload(result: ToolResult) -> str:
@@ -190,13 +271,15 @@ class AgentLoop:
             return json.dumps(
                 {
                     "ok": result.ok,
+                    "data": {
+                        "result_prefix": prefix,
+                        "original_length": len(serialized),
+                    },
                     "error": error,
                     "meta": {
                         "duration_ms": result.duration_ms,
                         "truncated": True,
-                        "original_length": len(serialized),
                     },
-                    "result_prefix": prefix,
                 },
                 ensure_ascii=False,
                 separators=(",", ":"),
