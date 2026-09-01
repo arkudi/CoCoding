@@ -7,6 +7,8 @@ defineProps<{
   title?: string
   history: Run[]
   selected: Run | null
+  draft: string
+  streaming: boolean
   cancelling: boolean
   error: string | null
 }>()
@@ -43,7 +45,15 @@ const statusCopy: Record<string, string> = {
       <section v-if="selected" class="run-evidence" aria-live="polite">
         <article class="message user-message"><span>任务</span><p>{{ selected.prompt }}</p></article>
         <ToolCallCard v-for="call in selected.tool_calls" :key="call.id" :call="call" />
-        <article v-if="selected.final_response" class="message assistant-message"><span>Agent</span><p>{{ selected.final_response }}</p></article>
+        <article
+          v-if="selected.final_response || draft"
+          class="message assistant-message"
+          :class="{ streaming }"
+        >
+          <span>Agent</span>
+          <p>{{ selected.final_response || draft }}</p>
+          <small v-if="streaming" class="streaming-status" role="status">正在生成</small>
+        </article>
         <p v-if="selected.error_text" class="run-error" role="alert">{{ selected.error_text }}</p>
       </section>
       <p v-if="error" class="run-error" role="alert">{{ error }}</p>

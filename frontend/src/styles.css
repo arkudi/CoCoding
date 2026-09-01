@@ -80,6 +80,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
 .message > span { color: var(--signal); font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
 .message p { margin: 8px 0 0; line-height: 1.65; white-space: pre-wrap; }
 .assistant-message { margin-left: clamp(20px, 6vw, 70px); border-left: 3px solid var(--pine); }
+.assistant-message.streaming p::after { content: ""; display: inline-block; width: .5em; height: 1em; margin-left: .25em; vertical-align: -.12em; background: var(--signal); animation: stream-cursor 900ms steps(1) infinite; }
+.streaming-status { color: var(--muted); font-size: 10px; letter-spacing: .08em; }
 .tool-card { border: 1px solid #bec9bd; background: #eef1e9; }
 .tool-card summary { display: flex; gap: 10px; align-items: center; padding: 12px 14px; cursor: pointer; list-style: none; }
 .tool-card summary::-webkit-details-marker { display: none; }
@@ -113,6 +115,7 @@ pre { margin: 0; font-family: "Cascadia Code", Consolas, monospace; font-size: 1
 .diff-preview { margin-top: 15px; color: #d8e7dc; }
 
 @keyframes pulse { 50% { opacity: .45; transform: scale(.76); } }
+@keyframes stream-cursor { 50% { opacity: 0; } }
 @media (max-width: 1080px) {
   .app-shell { grid-template-columns: minmax(14rem, 17rem) 1fr; }
   .workspace { grid-column: 1 / -1; min-height: 25rem; border-top: 1px solid var(--line); border-left: 0; }
