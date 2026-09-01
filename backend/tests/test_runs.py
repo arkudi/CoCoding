@@ -198,7 +198,7 @@ def test_active_execution_lock_returns_stable_conflict_without_run_creation(app_
             self.entered = threading.Event()
             self.release = threading.Event()
 
-        def complete(self, messages, tools):
+        def complete(self, messages, tools, on_text_delta=None):
             self.entered.set()
             assert self.release.wait(2)
             return AssistantTurn("Finished.")
@@ -392,7 +392,7 @@ def test_cancel_endpoint_requests_cooperative_cancellation(app_factory, tmp_path
             self.entered = threading.Event()
             self.release = threading.Event()
 
-        def complete(self, messages, tools):
+        def complete(self, messages, tools, on_text_delta=None):
             self.entered.set()
             assert self.release.wait(2)
             return AssistantTurn(

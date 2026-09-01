@@ -19,7 +19,7 @@ class BlockingModel:
         self.entered = threading.Event()
         self.release = threading.Event()
 
-    def complete(self, messages, tools):
+    def complete(self, messages, tools, on_text_delta=None):
         self.entered.set()
         if not self.release.wait(2):
             raise RuntimeError("test did not release model")

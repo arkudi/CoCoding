@@ -119,13 +119,21 @@ class AgentLoop:
                 return self._finish(run_id, step_count - 1, "cancelled", None, _CANCELLED_ERROR)
             self._assert_no_database_transaction()
             try:
-                turn = self._model.complete(messages, self._registry.schemas())
+                self._emit("assistant.started", run_id, {})
+                turn = self._model.complete(
+                    messages,
+                    self._registry.schemas(),
+                    on_text_delta=lambda delta: self._emit(
+                        "assistant.delta", run_id, {"delta": delta}
+                    ),
+                )
             except ModelProviderError as error:
                 return self._finish(run_id, step_count, "failed", None, error.safe_message)
             except Exception:
                 return self._finish(run_id, step_count, "failed", None, _PROVIDER_ERROR)
 
             self._persist_assistant(run_id, session_id, turn)
+            self._emit("assistant.finished", run_id, {})
             messages.append(self._assistant_message(turn))
 
             if not turn.tool_calls:
