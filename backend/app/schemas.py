@@ -118,3 +118,10 @@ class RunCancelRead(BaseModel):
     run_id: str
     status: str
     requested: bool
+
+
+class RunEventRead(BaseModel):
+    type: str
+    run_id: str
+    occurred_at: datetime
+    data: object

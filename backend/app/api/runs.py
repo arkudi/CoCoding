@@ -1,9 +1,11 @@
 from collections.abc import Iterator
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect, status
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 
 from app.agent.dependencies import get_model_client, get_run_manager
+from app.agent.events import RunEvent, RunEventHub
 from app.agent.run_manager import RunManager
 from app.agent.service import (
     AgentBusyError,
@@ -13,7 +15,7 @@ from app.agent.service import (
 )
 from app.agent.types import ModelClient
 from app.db.run_repository import RunRepository
-from app.schemas import RunCancelRead, RunCreate, RunRead
+from app.schemas import RunCancelRead, RunCreate, RunEventRead, RunRead
 
 
 router = APIRouter(tags=["runs"])
@@ -86,3 +88,40 @@ def get_run(run_id: str, db: Session = Depends(get_db)) -> RunRead:
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
     return RunRead.model_validate(detail)
+
+
+@router.websocket("/runs/{run_id}/events")
+async def run_events(websocket: WebSocket, run_id: str) -> None:
+    hub: RunEventHub = websocket.app.state.event_hub
+    subscription = hub.subscribe(run_id)
+    try:
+        with websocket.app.state.session_factory() as db:
+            detail = RunRepository(db).get_run_detail(run_id)
+        if detail is None:
+            await websocket.close(code=4404)
+            return
+        await websocket.accept()
+        snapshot = RunEventRead(
+            type="run.snapshot",
+            run_id=run_id,
+            occurred_at=RunEvent.create("run.snapshot", run_id, {}).occurred_at,
+            data=RunRead.model_validate(detail).model_dump(mode="json"),
+        )
+        await websocket.send_json(snapshot.model_dump(mode="json"))
+        if detail.status != "running":
+            return
+        while True:
+            event = await subscription.receive()
+            payload = RunEventRead(
+                type=event.type,
+                run_id=event.run_id,
+                occurred_at=event.occurred_at,
+                data=jsonable_encoder(event.data),
+            )
+            await websocket.send_json(payload.model_dump(mode="json"))
+            if event.type == "run.finished":
+                return
+    except WebSocketDisconnect:
+        return
+    finally:
+        hub.unsubscribe(subscription)
