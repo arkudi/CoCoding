@@ -22,6 +22,7 @@ def test_prompt_names_tools_and_working_rules(tmp_path):
     assert "Inspect relevant files before editing" in prompt
     assert "smallest task-related changes" in prompt
     assert "relevant verification" in prompt
+    assert "Do not repeat an identical failed tool call" in prompt
     assert "honestly explain what is blocking progress" in prompt
     assert "changed files, tests run, and unresolved issues" in prompt
     assert "chain-of-thought" not in prompt.casefold()

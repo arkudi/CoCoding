@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.agent.provider import DeepSeekClient, ModelProtocolError
+from app.agent.provider import DeepSeekClient, ModelProtocolError, ModelProviderError
 
 
 def test_from_settings_disables_sdk_retries(monkeypatch):
@@ -22,9 +22,14 @@ def test_from_settings_disables_sdk_retries(monkeypatch):
         deepseek_model="deepseek-v4-flash",
     )
 
-    DeepSeekClient.from_settings(settings)
+    adapter = DeepSeekClient.from_settings(settings)
 
-    assert captured["max_retries"] == 0
+    assert captured == {
+        "api_key": "test-key",
+        "base_url": "https://api.deepseek.com",
+        "max_retries": 0,
+    }
+    assert adapter._model == "deepseek-v4-flash"
 
 
 def test_complete_disables_thinking_and_converts_tool_calls():
@@ -76,8 +81,12 @@ def test_complete_rejects_response_without_a_choice():
         )
     )
 
-    with pytest.raises(ModelProtocolError):
+    with pytest.raises(ModelProtocolError) as captured:
         DeepSeekClient(client=client, model="deepseek-v4-flash").complete([], [])
+
+    assert captured.value.code == "protocol_error"
+    assert captured.value.safe_message == "The model provider returned an invalid response."
+    assert "choices" not in str(captured.value).casefold()
 
 
 @pytest.mark.parametrize(
@@ -103,20 +112,40 @@ def test_complete_retries_transient_errors_three_times(monkeypatch, error_factor
     monkeypatch.setattr(provider.time, "sleep", lambda delay: None)
     client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
 
-    with pytest.raises(Exception):
+    with pytest.raises(ModelProviderError) as captured:
         DeepSeekClient(client=client, model="deepseek-v4-flash").complete([], [])
 
     assert calls == 3
+    assert captured.value.code == "provider_unavailable"
+    assert captured.value.safe_message == "The model provider is temporarily unavailable."
+    assert all(
+        raw_text not in str(captured.value)
+        for raw_text in ("rate limited", "server error", "invalid key", "invalid request")
+    )
 
 
 @pytest.mark.parametrize(
-    "error_factory",
+    ("error_factory", "expected_code", "expected_message", "raw_text"),
     [
-        pytest.param(lambda: _authentication_error(), id="authentication"),
-        pytest.param(lambda: _invalid_request_error(), id="invalid-request"),
+        pytest.param(
+            lambda: _authentication_error(),
+            "authentication_failed",
+            "The model provider credentials are invalid.",
+            "invalid key",
+            id="authentication",
+        ),
+        pytest.param(
+            lambda: _invalid_request_error(),
+            "invalid_request",
+            "The model provider request is invalid.",
+            "invalid request",
+            id="invalid-request",
+        ),
     ],
 )
-def test_complete_does_not_retry_non_transient_errors(error_factory):
+def test_complete_does_not_retry_non_transient_errors(
+    error_factory, expected_code, expected_message, raw_text
+):
     """Retrying credentials or malformed requests must fail this test."""
     calls = 0
 
@@ -127,10 +156,13 @@ def test_complete_does_not_retry_non_transient_errors(error_factory):
 
     client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
 
-    with pytest.raises(Exception):
+    with pytest.raises(ModelProviderError) as captured:
         DeepSeekClient(client=client, model="deepseek-v4-flash").complete([], [])
 
     assert calls == 1
+    assert captured.value.code == expected_code
+    assert captured.value.safe_message == expected_message
+    assert raw_text not in str(captured.value)
 
 
 def _request():

@@ -75,7 +75,7 @@ curl.exe -sS -X POST "http://127.0.0.1:8000/api/sessions/$($session.id)/runs" `
   -d '{"prompt":"Inspect the project and report how to run its tests.","max_steps":20}'
 ```
 
-Security boundary: agent command execution is **not sandboxed**. Use this runtime only with trusted local workspaces, and do not point a session at directories containing data or commands you would not authorize the agent to access. The runtime permits only one active agent run per process; keep production at `--workers 1`.
+Security boundary: agent command execution is **not sandboxed**. Commands start with the session workspace as their current directory, but they retain the host user's filesystem and process access; file-tool path containment does not contain commands. Use this runtime only with trusted local workspaces and prompts. The runtime permits only one active agent run per process; keep production at `--workers 1`.
 
 ## Tests
 
@@ -99,7 +99,7 @@ Application configuration uses the `COCODING_` prefix, including `COCODING_DATAB
 
 ## Current scope
 
-This foundation provides a local session-aware coding workspace shell, health and session APIs, a synchronous Run API backed by a DeepSeek tool-calling agent, persisted run evidence, and a production-like static frontend host. The agent can list and read workspace files, write and replace workspace files, inspect its changes, and run bounded local commands within the trusted workspace boundary.
+This foundation provides a local session-aware coding workspace shell, health and session APIs, a synchronous Run API backed by a DeepSeek tool-calling agent, persisted run evidence, and a production-like static frontend host. The agent can list and read workspace files, write and replace workspace files, inspect its changes, and run bounded local commands with the workspace as their current directory. Those commands retain the host user's filesystem and process access.
 
 ## Dependency debt
 
