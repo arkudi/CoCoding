@@ -6,6 +6,7 @@ from fastapi import Depends, HTTPException, Request, status
 
 from app.agent.provider import DeepSeekClient
 from app.agent.service import AgentService
+from app.agent.run_manager import RunManager
 from app.agent.types import ModelClient
 
 
@@ -30,5 +31,8 @@ def get_agent_service(
     return AgentService(
         request.app.state.session_factory,
         model_client,  # type: ignore[arg-type]
-        request.app.state.execution_lock,
     )
+
+
+def get_run_manager(request: Request) -> RunManager:
+    return request.app.state.run_manager

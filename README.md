@@ -61,9 +61,9 @@ python -m uvicorn app.main:app --app-dir backend --workers 1
 
 After the build, FastAPI serves the frontend from `frontend/dist` at `http://127.0.0.1:8000`, including built assets. If no build is present, the root route returns an API hint instead.
 
-## Agent runtime and Run API
+## Agent runtime and realtime Run API
 
-Phase one includes session-backed synchronous agent runs. Create a session for a trusted local workspace, then submit a prompt to its Run API. The response includes the persisted run, messages, tool calls, and file-change evidence.
+The application accepts a session-backed Run with `202 Accepted`, executes it in one background worker, and publishes committed state changes through WebSocket. The Vue interface follows those events, then reconciles final messages, tool calls, and file-change evidence from SQLite.
 
 ```powershell
 $session = curl.exe -sS -X POST http://127.0.0.1:8000/api/sessions `
@@ -74,6 +74,10 @@ curl.exe -sS -X POST "http://127.0.0.1:8000/api/sessions/$($session.id)/runs" `
   -H "Content-Type: application/json" `
   -d '{"prompt":"Inspect the project and report how to run its tests.","max_steps":20}'
 ```
+
+The returned Run initially has status `running`. Follow `ws://127.0.0.1:8000/api/runs/{run_id}/events`, or query `GET /api/runs/{run_id}`. Run history is available from `GET /api/sessions/{session_id}/runs`.
+
+Cancellation uses `POST /api/runs/{run_id}/cancel`. It is cooperative: the current DeepSeek request or tool call finishes first, and the Agent stops at the next safe boundary. Cancellation does not undo completed file writes; inspect their Diff in the workspace panel.
 
 Security boundary: agent command execution is **not sandboxed**. Commands start with the session workspace as their current directory, but they retain the host user's filesystem and process access; file-tool path containment does not contain commands. Use this runtime only with trusted local workspaces and prompts. The runtime permits only one active agent run per process; keep production at `--workers 1`.
 
@@ -99,7 +103,7 @@ Application configuration uses the `COCODING_` prefix, including `COCODING_DATAB
 
 ## Current scope
 
-This foundation provides a local session-aware coding workspace shell, health and session APIs, a synchronous Run API backed by a DeepSeek tool-calling agent, persisted run evidence, and a production-like static frontend host. The agent can list and read workspace files, write and replace workspace files, inspect its changes, and run bounded local commands with the workspace as their current directory. Those commands retain the host user's filesystem and process access.
+CoCoding now provides a local session-aware Vue workspace, a background Run API backed by a DeepSeek tool-calling agent, WebSocket execution events, cooperative cancellation, persisted Run history, tool evidence, safe text preview, unified Diff display, and a production-like static frontend host. The Agent can list and read workspace files, write and replace workspace files, inspect its changes, and run bounded local commands with the workspace as their current directory. Those commands retain the host user's filesystem and process access.
 
 ## Dependency debt
 

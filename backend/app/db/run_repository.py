@@ -257,6 +257,43 @@ class RunRepository:
             file_changes=file_changes,
         )
 
+    def list_runs(self, session_id: str) -> tuple[RunDetail, ...]:
+        self._require_session(session_id)
+        run_ids = tuple(
+            self.db.scalars(
+                select(RunRecord.id)
+                .where(RunRecord.session_id == session_id)
+                .order_by(RunRecord.created_at.desc(), RunRecord.id.desc())
+            )
+        )
+        details = tuple(
+            detail
+            for run_id in run_ids
+            if (detail := self.get_run_detail(run_id)) is not None
+        )
+        self.db.rollback()
+        return details
+
+    def set_session_status(self, session_id: str, status: str) -> SessionRecord:
+        record = self._require_session(session_id)
+        record.status = status
+        record.updated_at = utc_now()
+        self._flush_refresh_and_commit(record)
+        return record
+
+    def interrupt_run(self, run_id: str, error_text: str) -> RunRecord:
+        record = self._require_run(run_id)
+        if record.status != "running":
+            self.db.rollback()
+            return record
+        now = utc_now()
+        record.status = "interrupted"
+        record.error_text = error_text
+        record.updated_at = now
+        record.finished_at = now
+        self._flush_refresh_and_commit(record)
+        return record
+
     def completed_history(
         self, session_id: str, character_budget: int = 40_000
     ) -> list[dict[str, object]]:

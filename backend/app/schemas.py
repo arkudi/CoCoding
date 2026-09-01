@@ -112,3 +112,27 @@ class RunRead(_TimestampedRead):
     messages: tuple[MessageRead, ...]
     tool_calls: tuple[ToolCallRead, ...]
     file_changes: tuple[FileChangeRead, ...]
+
+
+class RunCancelRead(BaseModel):
+    run_id: str
+    status: str
+    requested: bool
+
+
+class RunEventRead(BaseModel):
+    type: str
+    run_id: str
+    occurred_at: datetime
+    data: object
+
+
+class WorkspaceFilesRead(BaseModel):
+    files: tuple[str, ...]
+    truncated: bool
+
+
+class WorkspaceFileRead(BaseModel):
+    path: str
+    content: str
+    size: int = Field(ge=0)

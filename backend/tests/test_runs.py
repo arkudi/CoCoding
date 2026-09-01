@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from pathlib import Path
+import threading
 
 import pytest
 from fastapi.testclient import TestClient
@@ -30,6 +31,13 @@ def _run_count(client: TestClient) -> int:
         db.close()
 
 
+def _wait_for_terminal(client: TestClient, run_id: str) -> dict[str, object]:
+    client.app.state.run_manager.wait_for_idle(2)
+    response = client.get(f"/api/runs/{run_id}")
+    assert response.status_code == 200
+    return response.json()
+
+
 def test_submit_run_and_reload_complete_evidence(app_factory, tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -51,12 +59,10 @@ def test_submit_run_and_reload_complete_evidence(app_factory, tmp_path: Path) ->
             json={"prompt": "  update it  ", "max_steps": 20},
         )
 
-        assert response.status_code == 201
+        assert response.status_code == 202
         run = response.json()
-        reloaded = client.get(f"/api/runs/{run['id']}")
+        evidence = _wait_for_terminal(client, run["id"])
 
-    assert reloaded.status_code == 200
-    evidence = reloaded.json()
     assert evidence["prompt"] == "update it"
     assert evidence["status"] == "completed"
     assert evidence["final_response"] == "Updated a.txt."
@@ -96,13 +102,15 @@ def test_second_run_replays_only_completed_user_and_terminal_assistant_messages(
             f"/api/sessions/{session['id']}/runs",
             json={"prompt": "Inspect a.txt."},
         )
+        assert first.status_code == 202
+        _wait_for_terminal(client, first.json()["id"])
         second = client.post(
             f"/api/sessions/{session['id']}/runs",
             json={"prompt": "Use the prior result."},
         )
+        assert second.status_code == 202
+        _wait_for_terminal(client, second.json()["id"])
 
-    assert first.status_code == 201
-    assert second.status_code == 201
     assert model.calls[2]["messages"][1:] == [
         {"role": "user", "content": "Inspect a.txt."},
         {"role": "assistant", "content": "The first run inspected a.txt."},
@@ -185,18 +193,33 @@ def test_active_execution_lock_returns_stable_conflict_without_run_creation(app_
     workspace = tmp_path / "workspace"
     workspace.mkdir()
 
-    with app_factory(ScriptedModelClient([])) as client:
+    class BlockingModel:
+        def __init__(self) -> None:
+            self.entered = threading.Event()
+            self.release = threading.Event()
+
+        def complete(self, messages, tools):
+            self.entered.set()
+            assert self.release.wait(2)
+            return AssistantTurn("Finished.")
+
+    model = BlockingModel()
+    with app_factory(model) as client:
         session = _create_session(client, workspace)
-        lock = client.app.state.execution_lock
-        assert lock.acquire(blocking=False)
-        try:
-            response = client.post(f"/api/sessions/{session['id']}/runs", json={"prompt": "update it"})
-        finally:
-            lock.release()
+        first = client.post(
+            f"/api/sessions/{session['id']}/runs", json={"prompt": "first"}
+        )
+        assert first.status_code == 202
+        assert model.entered.wait(1)
+        response = client.post(
+            f"/api/sessions/{session['id']}/runs", json={"prompt": "second"}
+        )
 
         assert response.status_code == 409
         assert response.json()["detail"]["code"] == "RUN_ALREADY_ACTIVE"
-        assert _run_count(client) == 0
+        assert _run_count(client) == 1
+        model.release.set()
+        _wait_for_terminal(client, first.json()["id"])
 
 
 def test_history_load_failure_creates_no_run(app_factory, tmp_path: Path, monkeypatch) -> None:
@@ -227,9 +250,10 @@ def test_injected_model_runs_without_production_key(app_factory, tmp_path: Path)
     with app_factory(model) as client:
         session = _create_session(client, workspace)
         response = client.post(f"/api/sessions/{session['id']}/runs", json={"prompt": "update it"})
+        terminal = _wait_for_terminal(client, response.json()["id"])
 
-    assert response.status_code == 201
-    assert response.json()["status"] == "completed"
+    assert response.status_code == 202
+    assert terminal["status"] == "completed"
     assert model.calls
 
 
@@ -241,11 +265,12 @@ def test_provider_failures_are_safe_and_do_not_expose_exception_text(app_factory
     with app_factory(model) as client:
         session = _create_session(client, workspace)
         response = client.post(f"/api/sessions/{session['id']}/runs", json={"prompt": "update it"})
+        terminal = _wait_for_terminal(client, response.json()["id"])
 
-    assert response.status_code == 201
-    assert response.json()["status"] == "failed"
-    assert response.json()["error_text"] == "The model provider request failed."
-    assert "provider secret" not in response.text
+    assert response.status_code == 202
+    assert terminal["status"] == "failed"
+    assert terminal["error_text"] == "The model provider request failed."
+    assert "provider secret" not in str(terminal)
 
 
 def test_message_persistence_failure_marks_created_run_failed_with_safe_error(
@@ -271,13 +296,12 @@ def test_message_persistence_failure_marks_created_run_failed_with_safe_error(
             f"/api/sessions/{session['id']}/runs",
             json={"prompt": "Update it."},
         )
-        reloaded = client.get(f"/api/runs/{response.json()['id']}")
+        terminal = _wait_for_terminal(client, response.json()["id"])
 
-    assert response.status_code == 201
-    assert response.json()["status"] == "failed"
-    assert response.json()["error_text"] == "The run failed because of an internal error."
-    assert reloaded.json()["error_text"] == response.json()["error_text"]
-    assert "raw persistence detail" not in response.text
+    assert response.status_code == 202
+    assert terminal["status"] == "failed"
+    assert terminal["error_text"] == "The run failed because of an internal error."
+    assert "raw persistence detail" not in str(terminal)
 
 
 def test_file_change_generation_failure_still_marks_created_run_failed(
@@ -297,13 +321,12 @@ def test_file_change_generation_failure_still_marks_created_run_failed(
             f"/api/sessions/{session['id']}/runs",
             json={"prompt": "Update it."},
         )
-        reloaded = client.get(f"/api/runs/{response.json()['id']}")
+        terminal = _wait_for_terminal(client, response.json()["id"])
 
-    assert response.status_code == 201
-    assert response.json()["status"] == "failed"
-    assert response.json()["error_text"] == "The run failed because of an internal error."
-    assert reloaded.json()["error_text"] == response.json()["error_text"]
-    assert "raw evidence detail" not in response.text
+    assert response.status_code == 202
+    assert terminal["status"] == "failed"
+    assert terminal["error_text"] == "The run failed because of an internal error."
+    assert "raw evidence detail" not in str(terminal)
 
 
 def test_post_loop_repository_failure_is_terminalized_by_service_boundary(
@@ -312,12 +335,12 @@ def test_post_loop_repository_failure_is_terminalized_by_service_boundary(
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     original_get_detail = RunRepository.get_run_detail
-    failed_once = False
+    detail_load_count = 0
 
     def fail_first_detail_load(self, run_id):
-        nonlocal failed_once
-        if not failed_once:
-            failed_once = True
+        nonlocal detail_load_count
+        detail_load_count += 1
+        if detail_load_count == 3:
             raise RuntimeError("raw detail-load failure")
         return original_get_detail(self, run_id)
 
@@ -329,8 +352,66 @@ def test_post_loop_repository_failure_is_terminalized_by_service_boundary(
             f"/api/sessions/{session['id']}/runs",
             json={"prompt": "Update it."},
         )
+        terminal = _wait_for_terminal(client, response.json()["id"])
 
-    assert response.status_code == 201
-    assert response.json()["status"] == "failed"
-    assert response.json()["error_text"] == "The run failed because of an internal error."
-    assert "raw detail-load failure" not in response.text
+    assert response.status_code == 202
+    assert terminal["status"] == "failed"
+    assert terminal["error_text"] == "The run failed because of an internal error."
+    assert "raw detail-load failure" not in str(terminal)
+
+
+def test_run_history_and_terminal_cancel_are_durable(app_factory, tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    with app_factory(ScriptedModelClient([AssistantTurn("Finished.")])) as client:
+        session = _create_session(client, workspace)
+        created = client.post(
+            f"/api/sessions/{session['id']}/runs", json={"prompt": "inspect"}
+        )
+        terminal = _wait_for_terminal(client, created.json()["id"])
+
+        history = client.get(f"/api/sessions/{session['id']}/runs")
+        cancelled = client.post(f"/api/runs/{terminal['id']}/cancel")
+
+    assert history.status_code == 200
+    assert [item["id"] for item in history.json()] == [terminal["id"]]
+    assert cancelled.status_code == 200
+    assert cancelled.json() == {
+        "run_id": terminal["id"],
+        "status": "completed",
+        "requested": False,
+    }
+
+
+def test_cancel_endpoint_requests_cooperative_cancellation(app_factory, tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    class BlockingToolModel:
+        def __init__(self) -> None:
+            self.entered = threading.Event()
+            self.release = threading.Event()
+
+        def complete(self, messages, tools):
+            self.entered.set()
+            assert self.release.wait(2)
+            return AssistantTurn(
+                None,
+                (ToolCall("read-1", "read_file", '{"path":"missing.txt"}'),),
+            )
+
+    model = BlockingToolModel()
+    with app_factory(model) as client:
+        session = _create_session(client, workspace)
+        created = client.post(
+            f"/api/sessions/{session['id']}/runs", json={"prompt": "inspect"}
+        )
+        assert model.entered.wait(1)
+        first = client.post(f"/api/runs/{created.json()['id']}/cancel")
+        second = client.post(f"/api/runs/{created.json()['id']}/cancel")
+        model.release.set()
+        terminal = _wait_for_terminal(client, created.json()["id"])
+
+    assert first.json()["requested"] is True
+    assert second.json()["requested"] is True
+    assert terminal["status"] == "cancelled"

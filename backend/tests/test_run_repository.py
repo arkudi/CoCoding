@@ -327,3 +327,51 @@ def test_interrupt_running_runs_marks_all_running_rows_with_a_safe_error(
     assert repo.get_run_detail(first.id).status == "interrupted"  # type: ignore[union-attr]
     assert repo.get_run_detail(second.id).error_text == "Run interrupted during startup recovery."  # type: ignore[union-attr]
     assert repo.get_run_detail(completed.id).status == "completed"  # type: ignore[union-attr]
+
+
+def test_list_runs_returns_newest_first(
+    db: Session, workspace_session: SessionRecord
+) -> None:
+    repo = RunRepository(db)
+    first = repo.create_run(
+        session_id=workspace_session.id,
+        prompt="first",
+        model="fake",
+        prompt_version="v1",
+        max_steps=1,
+    )
+    repo.finish_run(first.id, "completed", step_count=1)
+    second = repo.create_run(
+        session_id=workspace_session.id,
+        prompt="second",
+        model="fake",
+        prompt_version="v1",
+        max_steps=1,
+    )
+
+    assert [run.id for run in repo.list_runs(workspace_session.id)] == [
+        second.id,
+        first.id,
+    ]
+
+
+def test_session_status_and_single_run_interruption_are_committed(
+    db: Session, workspace_session: SessionRecord
+) -> None:
+    repo = RunRepository(db)
+    run = repo.create_run(
+        session_id=workspace_session.id,
+        prompt="work",
+        model="fake",
+        prompt_version="v1",
+        max_steps=1,
+    )
+
+    session = repo.set_session_status(workspace_session.id, "running")
+    interrupted = repo.interrupt_run(run.id, "Run is no longer active.")
+
+    assert session.status == "running"
+    assert interrupted.status == "interrupted"
+    assert interrupted.error_text == "Run is no longer active."
+    assert interrupted.finished_at is not None
+    assert db.in_transaction() is False

@@ -1,6 +1,5 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-import threading
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
@@ -9,7 +8,10 @@ from fastapi.staticfiles import StaticFiles
 from app.api.health import router as health_router
 from app.api.sessions import router as sessions_router
 from app.api.runs import router as runs_router
+from app.api.workspace import router as workspace_router
 from app.agent.provider import DeepSeekClient
+from app.agent.events import RunEventHub
+from app.agent.run_manager import RunManager
 from app.agent.types import ModelClient
 from app.config import Settings, get_settings
 from app.db.database import build_engine, build_session_factory, create_schema
@@ -27,7 +29,11 @@ def create_app(
         create_schema(engine)
         application.state.engine = engine
         application.state.session_factory = build_session_factory(engine)
-        application.state.execution_lock = threading.Lock()
+        application.state.event_hub = RunEventHub()
+        application.state.run_manager = RunManager(
+            application.state.session_factory,
+            application.state.event_hub,
+        )
         db = application.state.session_factory()
         try:
             RunRepository(db).interrupt_running_runs()
@@ -36,6 +42,7 @@ def create_app(
         try:
             yield
         finally:
+            application.state.run_manager.shutdown(wait=True)
             engine.dispose()
 
     app = FastAPI(title=resolved.app_name, lifespan=lifespan)
@@ -45,6 +52,7 @@ def create_app(
     app.include_router(health_router, prefix="/api")
     app.include_router(sessions_router, prefix="/api")
     app.include_router(runs_router, prefix="/api")
+    app.include_router(workspace_router, prefix="/api")
 
     assets = resolved.frontend_dist / "assets"
     if assets.is_dir():

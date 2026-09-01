@@ -42,10 +42,11 @@ async function submit() {
         v-for="session in sessions.items"
         :key="session.id"
         type="button"
+        :aria-label="session.title"
         :class="{ selected: session.id === sessions.current_id }"
-        @click="sessions.current_id = session.id"
+        @click="sessions.select(session.id)"
       >
-        {{ session.title }}
+        <span>{{ session.title }}</span><small>{{ session.status }}</small>
       </button>
       <p v-if="!sessions.loading && sessions.items.length === 0" class="empty-copy">还没有任务记录</p>
     </nav>

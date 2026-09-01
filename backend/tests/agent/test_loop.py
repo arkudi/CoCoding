@@ -9,6 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.agent.loop import AgentLoop, CancellationToken
+from app.agent.events import RunEvent
 from app.agent.tools import ToolRegistry
 from app.agent.types import AssistantTurn, ToolCall, ToolError, ToolResult
 from app.agent.workspace import WorkspaceService
@@ -51,6 +52,47 @@ def run_context(tmp_path: Path):
 
 def execute(name: str, arguments: dict[str, object], call_id: str) -> ToolCall:
     return ToolCall(call_id, name, json.dumps(arguments))
+
+
+def test_loop_emits_committed_execution_events(run_context) -> None:
+    events: list[RunEvent] = []
+    model = ScriptedModelClient(
+        [
+            AssistantTurn(
+                None,
+                (execute("write_file", {"path": "note.txt", "content": "updated"}, "c1"),),
+            ),
+            AssistantTurn("Done."),
+        ]
+    )
+    loop = AgentLoop(
+        model,
+        run_context.registry,
+        run_context.repository,
+        run_context.workspace,
+        event_sink=events.append,
+    )
+
+    result = loop.run(
+        run_id=run_context.run.id,
+        session_id=run_context.session.id,
+        prompt="change it",
+        prior_messages=[],
+        max_steps=4,
+    )
+
+    assert result.status == "completed"
+    assert [event.type for event in events] == [
+        "message.created",
+        "message.created",
+        "tool.started",
+        "tool.finished",
+        "message.created",
+        "message.created",
+        "files.changed",
+        "run.finished",
+    ]
+    assert events[-1].data["status"] == "completed"  # type: ignore[index]
 
 
 def test_loop_executes_tool_then_completes(run_context):

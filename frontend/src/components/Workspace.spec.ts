@@ -1,0 +1,20 @@
+import { render, screen } from '@testing-library/vue'
+import userEvent from '@testing-library/user-event'
+import { expect, test } from 'vitest'
+import Workspace from './Workspace.vue'
+
+test('switches to Diff and renders unified file evidence', async () => {
+  const user = userEvent.setup()
+  render(Workspace, { props: {
+    files: [], selectedPath: null, preview: null, error: null,
+    fileChanges: [{
+      id: 'change-1', run_id: 'run-1', relative_path: 'src/main.py', operation: 'modified',
+      before_hash: 'a', after_hash: 'b', unified_diff: '-old\n+new\n',
+      created_at: '2026-09-01T00:00:00Z',
+    }],
+  } })
+  await user.click(screen.getByRole('tab', { name: 'Diff' }))
+  await user.click(screen.getByRole('button', { name: 'src/main.py' }))
+  expect(screen.getByText(/-old/)).toBeTruthy()
+  expect(screen.getByRole('tab', { name: 'Diff' }).getAttribute('aria-selected')).toBe('true')
+})

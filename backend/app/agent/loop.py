@@ -5,9 +5,12 @@ from __future__ import annotations
 import json
 import logging
 import threading
-from dataclasses import dataclass
-from typing import Literal
+from dataclasses import asdict, dataclass
+from typing import Callable, Literal
 
+from sqlalchemy import inspect
+
+from app.agent.events import RunEvent
 from app.agent.provider import ModelProviderError
 from app.agent.prompts import build_system_prompt
 from app.agent.tools import ToolRegistry
@@ -55,11 +58,13 @@ class AgentLoop:
         registry: ToolRegistry,
         repository: RunRepository,
         workspace: WorkspaceService | None = None,
+        event_sink: Callable[[RunEvent], None] | None = None,
     ) -> None:
         self._model = model
         self._registry = registry
         self._repository = repository
         self._workspace = workspace or registry._workspace
+        self._event_sink = event_sink
         self._current_step_count = 0
 
     def run(
@@ -104,7 +109,8 @@ class AgentLoop:
             *self._bounded_prior_messages(prior_messages),
             {"role": "user", "content": prompt},
         ]
-        self._repository.add_message(run_id, session_id, "user", prompt)
+        user_message = self._repository.add_message(run_id, session_id, "user", prompt)
+        self._emit("message.created", run_id, self._record_data(user_message))
         step_count = 0
 
         for step_count in range(1, max_steps + 1):
@@ -133,17 +139,20 @@ class AgentLoop:
                 tool_call = self._repository.start_tool_call(
                     run_id, call.id, call.name, call.arguments_json
                 )
+                self._emit("tool.started", run_id, self._record_data(tool_call))
                 result = self._execute_tool(call)
                 payload = self._tool_payload(result)
-                self._repository.finish_tool_call(
+                finished_call = self._repository.finish_tool_call(
                     tool_call.id,
                     "succeeded" if result.ok else "failed",
                     payload,
                     result.duration_ms,
                 )
-                self._repository.add_message(
+                self._emit("tool.finished", run_id, self._record_data(finished_call))
+                tool_message = self._repository.add_message(
                     run_id, session_id, "tool", payload, tool_call_id=call.id
                 )
+                self._emit("message.created", run_id, self._record_data(tool_message))
                 messages.append(
                     {"role": "tool", "tool_call_id": call.id, "content": payload}
                 )
@@ -158,7 +167,14 @@ class AgentLoop:
         final_response: str | None,
         error_text: str | None,
     ) -> AgentRunResult:
-        self._repository.replace_file_changes(run_id, self._workspace.changes())
+        file_changes = self._repository.replace_file_changes(
+            run_id, self._workspace.changes()
+        )
+        self._emit(
+            "files.changed",
+            run_id,
+            [self._record_data(change) for change in file_changes],
+        )
         self._repository.finish_run(
             run_id,
             status,
@@ -166,6 +182,10 @@ class AgentLoop:
             final_response=final_response,
             error_text=error_text,
         )
+        if self._event_sink is not None:
+            detail = self._repository.get_run_detail(run_id)
+            if detail is not None:
+                self._emit("run.finished", run_id, asdict(detail))
         return AgentRunResult(status, step_count, final_response, error_text)
 
     def _persist_assistant(self, run_id: str, session_id: str, turn: AssistantTurn) -> None:
@@ -174,9 +194,30 @@ class AgentLoop:
             tool_calls_json = json.dumps(
                 [self._tool_call_metadata(call) for call in turn.tool_calls], ensure_ascii=False
             )
-        self._repository.add_message(
+        message = self._repository.add_message(
             run_id, session_id, "assistant", turn.content, tool_calls_json=tool_calls_json
         )
+        self._emit("message.created", run_id, self._record_data(message))
+
+    def _emit(self, event_type: str, run_id: str, data: object) -> None:
+        if self._event_sink is None:
+            return
+        try:
+            self._event_sink(RunEvent.create(event_type, run_id, data))
+        except Exception as error:
+            logger.warning(
+                "Run event delivery failed (type=%s, error_type=%s)",
+                event_type,
+                type(error).__name__,
+            )
+
+    @staticmethod
+    def _record_data(record: object) -> dict[str, object]:
+        state = inspect(record)
+        return {
+            attribute.key: getattr(record, attribute.key)
+            for attribute in state.mapper.column_attrs
+        }
 
     @staticmethod
     def _bounded_prior_messages(
