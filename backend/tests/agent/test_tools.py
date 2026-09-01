@@ -1,4 +1,5 @@
 import json
+import subprocess
 import sys
 
 import pytest
@@ -96,9 +97,16 @@ def test_run_command_returns_nonzero_output(tmp_path):
     assert "bad" in result.data["stdout"]
 
 
-def test_run_command_times_out_without_leaving_execution_running(tmp_path):
+def test_run_command_times_out_with_inherited_child_pipe_handles(tmp_path):
     registry = ToolRegistry(WorkspaceService(tmp_path))
-    command = f'"{sys.executable}" -c "import time; time.sleep(10)"'
+    script = tmp_path / "linger.py"
+    script.write_text(
+        "import subprocess, sys, time\n"
+        "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
+        "time.sleep(30)\n",
+        encoding="utf-8",
+    )
+    command = f'"{sys.executable}" "{script}"'
 
     result = registry.execute(call("run_command", {"command": command, "timeout": 1}))
 
@@ -118,8 +126,25 @@ def test_run_command_rejects_timeout_above_maximum(tmp_path):
     assert result.error.code == "INVALID_TOOL_ARGUMENTS"
 
 
-def test_run_command_limits_combined_output_to_twenty_thousand_characters(tmp_path):
-    command = f'"{sys.executable}" -c "print(\'x\' * 15000); import sys; print(\'y\' * 15000, file=sys.stderr)"'
+def test_run_command_streams_verbose_output_without_using_communicate(
+    tmp_path, monkeypatch
+):
+    real_popen = subprocess.Popen
+
+    def popen_without_communicate(*args, **kwargs):
+        process = real_popen(*args, **kwargs)
+
+        def fail_communicate(*communicate_args, **communicate_kwargs):
+            raise AssertionError("command output must be drained incrementally")
+
+        process.communicate = fail_communicate
+        return process
+
+    monkeypatch.setattr("app.agent.tools.subprocess.Popen", popen_without_communicate)
+    command = (
+        f'"{sys.executable}" -c "print(\'x\' * 250000); '
+        "import sys; print('y' * 250000, file=sys.stderr)\""
+    )
     result = ToolRegistry(WorkspaceService(tmp_path)).execute(
         call("run_command", {"command": command})
     )
@@ -129,8 +154,39 @@ def test_run_command_limits_combined_output_to_twenty_thousand_characters(tmp_pa
     assert result.truncated is True
 
 
+def test_run_command_drains_mixed_stdout_and_stderr(tmp_path):
+    command = (
+        f'"{sys.executable}" -c "import sys; print(\'out\'); '
+        "print('err', file=sys.stderr)\""
+    )
+
+    result = ToolRegistry(WorkspaceService(tmp_path)).execute(
+        call("run_command", {"command": command})
+    )
+
+    assert result.ok is True
+    assert result.data["stdout"] == "out\n"
+    assert result.data["stderr"] == "err\n"
+    assert result.truncated is False
+
+
 def test_run_command_rejects_empty_command(tmp_path):
     result = ToolRegistry(WorkspaceService(tmp_path)).execute(call("run_command", {"command": ""}))
+
+    assert result.ok is False
+    assert result.error is not None
+    assert result.error.code == "INVALID_TOOL_ARGUMENTS"
+
+
+def test_run_command_rejects_whitespace_only_command_before_subprocess(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr("app.agent.tools.subprocess.Popen", fail_if_command_starts)
+    registry = ToolRegistry(WorkspaceService(tmp_path))
+
+    result = registry.execute(
+        call("run_command", {"command": " \t\r\n "})
+    )
 
     assert result.ok is False
     assert result.error is not None
@@ -176,6 +232,36 @@ def test_run_command_rejects_root_deletion_when_followed_by_attached_shell_separ
     assert result.ok is False
     assert result.error is not None
     assert result.error.code == "DESTRUCTIVE_COMMAND"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo safe\nrm -rf /",
+        "echo safe\rRemove-Item -Recurse C:/",
+        "echo safe\r\nC:\\Windows\\System32\\shutdown.exe",
+        "/usr/bin/rm -rf /",
+        "C:\\tools\\rm.exe -rf C:\\",
+    ],
+)
+def test_run_command_rejects_destructive_segments_after_newlines_and_direct_paths(
+    tmp_path, command, monkeypatch
+):
+    monkeypatch.setattr("app.agent.tools.subprocess.Popen", fail_if_command_starts)
+    registry = ToolRegistry(WorkspaceService(tmp_path))
+
+    result = registry.execute(call("run_command", {"command": command}))
+
+    assert result.ok is False
+    assert result.error is not None
+    assert result.error.code == "DESTRUCTIVE_COMMAND"
+
+
+def test_preflight_preserves_newlines_inside_quotes(monkeypatch):
+    command = 'echo "safe\nrm -rf /"'
+    monkeypatch.setattr("app.agent.tools.subprocess.Popen", fail_if_command_starts)
+
+    assert ToolRegistry._is_explicit_destructive_command(command) is False
 
 
 @pytest.mark.parametrize(

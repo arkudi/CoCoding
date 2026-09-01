@@ -9,10 +9,11 @@ import os
 import re
 import signal
 import subprocess
+import threading
 import time
-from typing import Callable
+from typing import Callable, TextIO
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from app.agent.types import ToolCall, ToolError, ToolResult
 from app.agent.workspace import WorkspaceError, WorkspaceService
@@ -20,7 +21,9 @@ from app.agent.workspace import WorkspaceError, WorkspaceService
 logger = logging.getLogger(__name__)
 
 _MAX_COMMAND_OUTPUT_CHARS = 20_000
-_COMMAND_OPERATORS = frozenset({";", "&&", "||", "|", "&"})
+_COMMAND_READ_CHUNK_CHARS = 4_096
+_PROCESS_CLEANUP_TIMEOUT_SECONDS = 2.0
+_COMMAND_OPERATORS = frozenset({";", "&&", "||", "|", "&", "\n"})
 
 
 class StrictArgs(BaseModel):
@@ -52,6 +55,14 @@ class RunCommandArgs(StrictArgs):
     command: str = Field(min_length=1)
     timeout: int = Field(default=30, ge=1, le=120)
 
+    @field_validator("command")
+    @classmethod
+    def normalize_command(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("command must not be blank")
+        return normalized
+
 
 class GetDiffArgs(StrictArgs):
     pass
@@ -66,6 +77,52 @@ class _CommandTimeout(Exception):
 
 class _DestructiveCommand(Exception):
     pass
+
+
+class _BoundedCommandOutput:
+    """Drain both pipes fully while retaining one shared bounded prefix."""
+
+    def __init__(self, limit: int) -> None:
+        self._remaining = limit
+        self._parts: dict[str, list[str]] = {"stdout": [], "stderr": []}
+        self._truncated = False
+        self._errors: list[Exception] = []
+        self._lock = threading.Lock()
+
+    def drain(self, stream: TextIO, output_name: str) -> None:
+        try:
+            while True:
+                chunk = stream.read(_COMMAND_READ_CHUNK_CHARS)
+                if not chunk:
+                    return
+                with self._lock:
+                    kept = chunk[: self._remaining]
+                    if kept:
+                        self._parts[output_name].append(kept)
+                        self._remaining -= len(kept)
+                    if len(kept) != len(chunk):
+                        self._truncated = True
+        except (OSError, ValueError) as error:
+            with self._lock:
+                self._errors.append(error)
+        finally:
+            try:
+                stream.close()
+            except OSError:
+                pass
+
+    def mark_truncated(self) -> None:
+        with self._lock:
+            self._truncated = True
+
+    def snapshot(self) -> tuple[str, str, bool, tuple[Exception, ...]]:
+        with self._lock:
+            return (
+                "".join(self._parts["stdout"]),
+                "".join(self._parts["stderr"]),
+                self._truncated,
+                tuple(self._errors),
+            )
 
 
 class ToolRegistry:
@@ -178,39 +235,101 @@ class ToolRegistry:
             errors="replace",
             start_new_session=os.name != "nt",
         )
+        assert process.stdout is not None
+        assert process.stderr is not None
+        output = _BoundedCommandOutput(_MAX_COMMAND_OUTPUT_CHARS)
+        readers = (
+            threading.Thread(
+                target=output.drain,
+                args=(process.stdout, "stdout"),
+                daemon=True,
+            ),
+            threading.Thread(
+                target=output.drain,
+                args=(process.stderr, "stderr"),
+                daemon=True,
+            ),
+        )
+        for reader in readers:
+            reader.start()
+
+        timed_out = False
         try:
-            stdout, stderr = process.communicate(timeout=arguments.timeout)
+            process.wait(timeout=arguments.timeout)
         except subprocess.TimeoutExpired:
-            self._terminate_process_tree(process)
-            stdout, stderr = process.communicate()
-            data, truncated = self._command_data(process.returncode, stdout, stderr)
+            timed_out = True
+            cleanup_deadline = time.monotonic() + _PROCESS_CLEANUP_TIMEOUT_SECONDS
+            self._terminate_process_tree(process, cleanup_deadline)
+
+        cleanup_deadline = time.monotonic() + _PROCESS_CLEANUP_TIMEOUT_SECONDS
+        readers_finished = self._join_readers(readers, cleanup_deadline)
+        if not readers_finished:
+            output.mark_truncated()
+            logger.warning("Command pipe cleanup exceeded its deadline")
+
+        stdout, stderr, truncated, read_errors = output.snapshot()
+        if read_errors and not timed_out:
+            raise read_errors[0]
+        data = {
+            "exit_code": process.returncode,
+            "stdout": stdout,
+            "stderr": stderr,
+        }
+        if timed_out:
             raise _CommandTimeout(data, truncated)
-        return self._command_data(process.returncode, stdout, stderr)
+        return data, truncated
 
     @staticmethod
-    def _command_data(exit_code: int | None, stdout: str, stderr: str) -> tuple[dict[str, object], bool]:
-        remaining = _MAX_COMMAND_OUTPUT_CHARS
-        bounded_stdout = stdout[:remaining]
-        remaining -= len(bounded_stdout)
-        bounded_stderr = stderr[:remaining]
-        truncated = len(bounded_stdout) != len(stdout) or len(bounded_stderr) != len(stderr)
-        return {
-            "exit_code": exit_code,
-            "stdout": bounded_stdout,
-            "stderr": bounded_stderr,
-        }, truncated
+    def _join_readers(
+        readers: tuple[threading.Thread, threading.Thread], deadline: float
+    ) -> bool:
+        for reader in readers:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            reader.join(remaining)
+        return all(not reader.is_alive() for reader in readers)
 
     @staticmethod
-    def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
+    def _terminate_process_tree(
+        process: subprocess.Popen[str], deadline: float
+    ) -> None:
         if os.name == "nt":
-            subprocess.run(
-                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-            )
+            remaining = max(0.01, deadline - time.monotonic())
+            try:
+                subprocess.run(
+                    ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                    timeout=remaining,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                logger.warning("Windows process-tree termination did not complete in time")
         else:
-            os.killpg(process.pid, signal.SIGKILL)
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            try:
+                process.wait(timeout=remaining)
+                return
+            except subprocess.TimeoutExpired:
+                pass
+        if process.poll() is None:
+            try:
+                process.kill()
+            except OSError:
+                return
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                try:
+                    process.wait(timeout=remaining)
+                except subprocess.TimeoutExpired:
+                    logger.warning("Command process cleanup exceeded its deadline")
 
     @staticmethod
     def _is_explicit_destructive_command(command: str) -> bool:
@@ -243,6 +362,13 @@ class ToolRegistry:
                 continue
             if character in {"\"", "'"}:
                 quote = character
+            elif character in {"\r", "\n"}:
+                if word:
+                    tokens.append("".join(word))
+                    word = []
+                tokens.append("\n")
+                if character == "\r" and index + 1 < len(command) and command[index + 1] == "\n":
+                    index += 1
             elif character.isspace():
                 if word:
                     tokens.append("".join(word))
@@ -267,7 +393,7 @@ class ToolRegistry:
     def _is_explicit_destructive_segment(tokens: list[str]) -> bool:
         if not tokens:
             return False
-        leading = tokens[0]
+        leading = re.split(r"[\\/]", tokens[0])[-1]
         if leading in {"format", "format.com", "format.exe", "shutdown", "shutdown.exe"}:
             return True
         if leading not in {"rm", "rm.exe", "remove-item", "del", "del.exe", "erase", "erase.exe"}:

@@ -6,7 +6,7 @@ from app.agent.workspace import FileChangeEvidence, WorkspaceError, WorkspaceSer
 
 
 def test_write_snapshots_original_only_once_and_builds_diff(tmp_path):
-    (tmp_path / "a.txt").write_text("before\n", encoding="utf-8")
+    (tmp_path / "a.txt").write_bytes(b"before\n")
     service = WorkspaceService(tmp_path)
     service.write_file("a.txt", "middle\n")
     service.write_file("a.txt", "after\n")
@@ -16,7 +16,7 @@ def test_write_snapshots_original_only_once_and_builds_diff(tmp_path):
     assert changes[0].operation == "modified"
     assert "-before" in changes[0].unified_diff
     assert "+after" in changes[0].unified_diff
-    assert changes[0].before_hash == hashlib.sha256(b"before\r\n").hexdigest()
+    assert changes[0].before_hash == hashlib.sha256(b"before\n").hexdigest()
     assert changes[0].after_hash == hashlib.sha256((tmp_path / "a.txt").read_bytes()).hexdigest()
 
 

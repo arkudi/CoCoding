@@ -21,6 +21,11 @@ IGNORED_PARTS = {
     "coverage",
     "htmlcov",
 }
+_NORMALIZED_IGNORED_PARTS = {os.path.normcase(part) for part in IGNORED_PARTS}
+
+
+def _is_ignored_component(part: str) -> bool:
+    return os.path.normcase(part) in _NORMALIZED_IGNORED_PARTS
 
 
 class WorkspaceError(Exception):
@@ -60,12 +65,12 @@ class WorkspaceService:
         candidate = (self.root / candidate_input).resolve()
         if not candidate.is_relative_to(self.root):
             raise WorkspaceError("PATH_OUTSIDE_WORKSPACE", "path escapes workspace")
+        relative_parts = candidate.relative_to(self.root).parts
+        if any(_is_ignored_component(part) for part in relative_parts):
+            raise WorkspaceError("PATH_IGNORED", "access to an ignored path is not allowed")
         return candidate
 
     def list_files(self, path: str = ".") -> dict[str, object]:
-        requested = Path(path)
-        if any(part in IGNORED_PARTS for part in requested.parts):
-            raise WorkspaceError("PATH_IGNORED", "listing an ignored directory is not allowed")
         base = self.resolve(path)
         if not base.exists():
             raise WorkspaceError("PATH_NOT_FOUND", "directory does not exist")
@@ -73,8 +78,12 @@ class WorkspaceService:
             raise WorkspaceError("PATH_NOT_DIRECTORY", "listing path is not a directory")
 
         paths: list[str] = []
+        seen: set[str] = set()
+        reached_limit = False
         for current, directories, filenames in os.walk(base, topdown=True, followlinks=False):
-            directories[:] = sorted(name for name in directories if name not in IGNORED_PARTS)
+            directories[:] = sorted(
+                name for name in directories if not _is_ignored_component(name)
+            )
             for name in sorted(filenames):
                 file_path = Path(current) / name
                 try:
@@ -84,8 +93,15 @@ class WorkspaceService:
                 if not resolved_file.is_relative_to(self.root) or not resolved_file.is_file():
                     continue
                 relative = file_path.relative_to(self.root).as_posix()
-                if relative not in paths:
-                    paths.append(relative)
+                if relative in seen:
+                    continue
+                seen.add(relative)
+                paths.append(relative)
+                if len(paths) > self.max_entries:
+                    reached_limit = True
+                    break
+            if reached_limit:
+                break
         paths.sort()
         return {"files": paths[: self.max_entries], "truncated": len(paths) > self.max_entries}
 
@@ -189,13 +205,8 @@ class WorkspaceService:
 
     def _read_bounded_text(self, file_path: Path) -> tuple[bytes, str]:
         try:
-            size = file_path.stat().st_size
-        except OSError as exc:
-            raise WorkspaceError("READ_FAILED", "could not stat file") from exc
-        if size > self.max_text_bytes:
-            raise WorkspaceError("FILE_TOO_LARGE", "file exceeds text byte limit")
-        try:
-            raw = file_path.read_bytes()
+            with file_path.open("rb") as stream:
+                raw = stream.read(self.max_text_bytes + 1)
         except OSError as exc:
             raise WorkspaceError("READ_FAILED", "could not read file") from exc
         if len(raw) > self.max_text_bytes:
