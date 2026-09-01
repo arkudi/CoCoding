@@ -67,6 +67,25 @@ def test_complete_reconstructs_tools_without_emitting_reasoning():
     )
 
 
+def test_complete_reconstructs_interleaved_tools_in_index_order():
+    """Using arrival order instead of the fragment index must fail this test."""
+    stream = iter(
+        [
+            _tool_chunk(1, call_id="call_2", name="read_", arguments='{"pa'),
+            _tool_chunk(0, call_id="call_1", name="write_", arguments='{"pa'),
+            _tool_chunk(1, name="file", arguments='th":"b.txt"}'),
+            _tool_chunk(0, name="file", arguments='th":"a.txt"}'),
+        ]
+    )
+
+    turn = DeepSeekClient(_client_returning(stream), "deepseek-v4-flash").complete([], [])
+
+    assert turn.tool_calls == (
+        ToolCall("call_1", "write_file", '{"path":"a.txt"}'),
+        ToolCall("call_2", "read_file", '{"path":"b.txt"}'),
+    )
+
+
 def test_complete_rejects_tool_stream_without_id_or_name():
     """Returning a ToolCall for incomplete streamed metadata must fail this test."""
     stream = iter([_tool_chunk(0, arguments='{"path":"a.txt"}')])
@@ -90,6 +109,34 @@ def test_complete_does_not_retry_after_visible_output(monkeypatch):
         def broken_stream():
             yield _content_chunk("partial")
             raise _connection_error()
+
+        return broken_stream()
+
+    monkeypatch.setattr(provider.time, "sleep", lambda delay: None)
+    deltas = []
+    with pytest.raises(ModelProviderError) as captured:
+        DeepSeekClient(_client_with_create(create), "deepseek-v4-flash").complete(
+            [], [], on_text_delta=deltas.append
+        )
+
+    assert deltas == ["partial"]
+    assert calls == 1
+    assert captured.value.code == "provider_unavailable"
+
+
+def test_complete_does_not_retry_after_visible_output_on_iterator_5xx(monkeypatch):
+    """Retrying an iterator-raised 5xx after visible text must fail this test."""
+    import app.agent.provider as provider
+
+    calls = 0
+
+    def create(**kwargs):
+        nonlocal calls
+        calls += 1
+
+        def broken_stream():
+            yield _content_chunk("partial")
+            raise _server_error()
 
         return broken_stream()
 
