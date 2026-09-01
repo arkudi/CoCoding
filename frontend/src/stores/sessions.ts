@@ -34,6 +34,9 @@ export const useSessionsStore = defineStore('sessions', {
             seen.add(item.id)
             return true
           })
+          if (this.current_id === null && this.items.length > 0) {
+            this.current_id = this.items[0].id
+          }
         }
       } catch (error) {
         if (this.load_id === load_id) {
