@@ -112,3 +112,9 @@ class RunRead(_TimestampedRead):
     messages: tuple[MessageRead, ...]
     tool_calls: tuple[ToolCallRead, ...]
     file_changes: tuple[FileChangeRead, ...]
+
+
+class RunCancelRead(BaseModel):
+    run_id: str
+    status: str
+    requested: bool
