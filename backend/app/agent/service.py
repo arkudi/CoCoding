@@ -54,6 +54,7 @@ class AgentService:
                     raise WorkspaceUnavailableError()
 
                 repository = RunRepository(db)
+                prior_messages = repository.completed_history(session_id)
                 run = repository.create_run(
                     session_id=session_id,
                     prompt=prompt,
@@ -67,7 +68,7 @@ class AgentService:
                     run_id=run.id,
                     session_id=session_id,
                     prompt=prompt,
-                    prior_messages=repository.completed_history(session_id),
+                    prior_messages=prior_messages,
                     max_steps=max_steps,
                     cancellation=CancellationToken(),
                 )

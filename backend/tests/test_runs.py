@@ -1,12 +1,14 @@
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 
 from app.agent.types import AssistantTurn, ToolCall
 from app.config import Settings
 from app.db.models import RunRecord
+from app.db.run_repository import RunRepository
 from app.main import create_app
 from tests.agent.fakes import ScriptedModelClient
 
@@ -155,6 +157,26 @@ def test_active_execution_lock_returns_stable_conflict_without_run_creation(app_
 
         assert response.status_code == 409
         assert response.json()["detail"]["code"] == "RUN_ALREADY_ACTIVE"
+        assert _run_count(client) == 0
+
+
+def test_history_load_failure_creates_no_run(app_factory, tmp_path: Path, monkeypatch) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    class HistoryLoadError(Exception):
+        pass
+
+    def fail_history_load(self, session_id: str):
+        raise HistoryLoadError("safe test exception")
+
+    monkeypatch.setattr(RunRepository, "completed_history", fail_history_load)
+
+    with app_factory(ScriptedModelClient([])) as client:
+        session = _create_session(client, workspace)
+        with pytest.raises(HistoryLoadError, match="safe test exception"):
+            client.post(f"/api/sessions/{session['id']}/runs", json={"prompt": "update it"})
+
         assert _run_count(client) == 0
 
 
