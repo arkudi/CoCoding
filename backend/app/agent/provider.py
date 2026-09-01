@@ -13,7 +13,7 @@ from openai import (
     RateLimitError,
 )
 
-from app.agent.types import AssistantTurn, ModelClient, ToolCall
+from app.agent.types import AssistantTurn, ModelClient, TextDeltaSink, ToolCall
 
 logger = logging.getLogger(__name__)
 
@@ -52,17 +52,39 @@ class DeepSeekClient(ModelClient):
         self,
         messages: list[dict[str, object]],
         tools: list[dict[str, object]],
+        on_text_delta: TextDeltaSink | None = None,
     ) -> AssistantTurn:
         for attempt in range(len(_RETRY_DELAYS) + 1):
             try:
-                completion = self._client.chat.completions.create(
+                stream = self._client.chat.completions.create(
                     model=self._model,
                     messages=messages,
                     tools=tools,
                     tool_choice="auto",
+                    stream=True,
                     extra_body={"thinking": {"type": "disabled"}},
                 )
-                return self._to_turn(completion)
+                parts: list[str] = []
+                tool_calls: tuple[ToolCall, ...] = ()
+                for chunk in stream:
+                    if not chunk.choices:
+                        raise ModelProtocolError()
+                    delta = chunk.choices[0].delta
+                    content = getattr(delta, "content", None)
+                    if content:
+                        parts.append(content)
+                        if on_text_delta is not None:
+                            on_text_delta(content)
+                    if delta.tool_calls:
+                        tool_calls = tuple(
+                            ToolCall(
+                                id=tool_call.id,
+                                name=tool_call.function.name,
+                                arguments_json=tool_call.function.arguments,
+                            )
+                            for tool_call in delta.tool_calls
+                        )
+                return AssistantTurn("".join(parts) or None, tool_calls)
             except (RateLimitError, APITimeoutError, APIConnectionError) as error:
                 if self._retry_or_raise(error, attempt):
                     continue
@@ -76,22 +98,6 @@ class DeepSeekClient(ModelClient):
                 raise self._provider_error(error) from error
 
         raise AssertionError("unreachable")
-
-    @staticmethod
-    def _to_turn(completion: Any) -> AssistantTurn:
-        if not completion.choices:
-            raise ModelProtocolError()
-
-        message = completion.choices[0].message
-        tool_calls = tuple(
-            ToolCall(
-                id=tool_call.id,
-                name=tool_call.function.name,
-                arguments_json=tool_call.function.arguments,
-            )
-            for tool_call in (message.tool_calls or ())
-        )
-        return AssistantTurn(content=message.content, tool_calls=tool_calls)
 
     def _retry_or_raise(self, error: OpenAIError, attempt: int) -> bool:
         self._log_error(error, attempt)

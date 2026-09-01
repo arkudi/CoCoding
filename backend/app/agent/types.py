@@ -1,4 +1,5 @@
 import json
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from typing import Protocol
 
@@ -42,10 +43,14 @@ class AssistantTurn:
     tool_calls: tuple[ToolCall, ...] = ()
 
 
+TextDeltaSink = Callable[[str], None]
+
+
 class ModelClient(Protocol):
     def complete(
         self,
         messages: list[dict[str, object]],
         tools: list[dict[str, object]],
+        on_text_delta: TextDeltaSink | None = None,
     ) -> AssistantTurn:
         raise NotImplementedError

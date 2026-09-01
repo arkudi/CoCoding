@@ -3,6 +3,31 @@ from types import SimpleNamespace
 import pytest
 
 from app.agent.provider import DeepSeekClient, ModelProtocolError, ModelProviderError
+from app.agent.types import AssistantTurn
+
+
+def _content_chunk(content):
+    delta = SimpleNamespace(content=content, tool_calls=None)
+    return SimpleNamespace(choices=[SimpleNamespace(delta=delta)])
+
+
+def test_complete_streams_visible_content_and_reconstructs_turn():
+    captured = {}
+    stream = iter([_content_chunk("Hello"), _content_chunk(None), _content_chunk(" world")])
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(
+        create=lambda **kwargs: captured.update(kwargs) or stream
+    )))
+    deltas = []
+
+    turn = DeepSeekClient(client, "deepseek-v4-flash").complete(
+        [{"role": "user", "content": "hello"}],
+        [{"type": "function"}],
+        on_text_delta=deltas.append,
+    )
+
+    assert captured["stream"] is True
+    assert deltas == ["Hello", " world"]
+    assert turn == AssistantTurn("Hello world")
 
 
 def test_from_settings_disables_sdk_retries(monkeypatch):
@@ -35,27 +60,31 @@ def test_from_settings_disables_sdk_retries(monkeypatch):
 def test_complete_disables_thinking_and_converts_tool_calls():
     """Removing native function-tool arguments from a response must fail this test."""
     captured = {}
-    completion = SimpleNamespace(
-        choices=[
+    stream = iter(
+        [
             SimpleNamespace(
-                message=SimpleNamespace(
-                    content=None,
-                    tool_calls=[
-                        SimpleNamespace(
-                            id="call_1",
-                            function=SimpleNamespace(
-                                name="read_file", arguments='{"path":"a.py"}'
-                            ),
+                choices=[
+                    SimpleNamespace(
+                        delta=SimpleNamespace(
+                            content=None,
+                            tool_calls=[
+                                SimpleNamespace(
+                                    id="call_1",
+                                    function=SimpleNamespace(
+                                        name="read_file", arguments='{"path":"a.py"}'
+                                    ),
+                                )
+                            ],
                         )
-                    ],
-                )
+                    )
+                ]
             )
         ]
     )
     client = SimpleNamespace(
         chat=SimpleNamespace(
             completions=SimpleNamespace(
-                create=lambda **kwargs: captured.update(kwargs) or completion
+                create=lambda **kwargs: captured.update(kwargs) or stream
             )
         )
     )
@@ -77,7 +106,7 @@ def test_complete_rejects_response_without_a_choice():
     """Silently accepting a malformed provider response must fail this test."""
     client = SimpleNamespace(
         chat=SimpleNamespace(
-            completions=SimpleNamespace(create=lambda **kwargs: SimpleNamespace(choices=[]))
+            completions=SimpleNamespace(create=lambda **kwargs: iter([SimpleNamespace(choices=[])]))
         )
     )
 
