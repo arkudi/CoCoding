@@ -19,6 +19,14 @@ const completed: Run = {
   finished_at: '2026-09-01T00:00:01Z', messages: [], tool_calls: [], file_changes: [],
 }
 
+const completedWithEmptyResponse: Run = {
+  id: 'run-empty-completed', session_id: 'session-1', prompt: 'Inspect the project', model: 'fake',
+  prompt_version: 'v1', status: 'completed', max_steps: 20, step_count: 1,
+  final_response: '', error_text: null,
+  created_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-01T00:00:01Z',
+  finished_at: '2026-09-01T00:00:01Z', messages: [], tool_calls: [], file_changes: [],
+}
+
 test('renders task evidence and final response', () => {
   const run: Run = {
     id: 'run-1', session_id: 'session-1', prompt: 'Inspect the project', model: 'fake',
@@ -51,5 +59,14 @@ test('prefers the durable final response over a stale draft', () => {
     draft: 'Stale draft', streaming: false, cancelling: false, error: null,
   } })
   expect(screen.getByText('Saved answer')).toBeTruthy()
+  expect(screen.queryByText('Stale draft')).toBeNull()
+})
+
+test('prefers an empty durable final response over a stale draft', () => {
+  render(Timeline, { props: {
+    title: 'Demo', history: [completedWithEmptyResponse], selected: completedWithEmptyResponse,
+    draft: 'Stale draft', streaming: false, cancelling: false, error: null,
+  } })
+  expect(screen.getByText('Agent')).toBeTruthy()
   expect(screen.queryByText('Stale draft')).toBeNull()
 })

@@ -46,12 +46,12 @@ const statusCopy: Record<string, string> = {
         <article class="message user-message"><span>任务</span><p>{{ selected.prompt }}</p></article>
         <ToolCallCard v-for="call in selected.tool_calls" :key="call.id" :call="call" />
         <article
-          v-if="selected.final_response || draft"
+          v-if="selected.final_response !== null || draft"
           class="message assistant-message"
           :class="{ streaming }"
         >
           <span>Agent</span>
-          <p>{{ selected.final_response || draft }}</p>
+          <p>{{ selected.final_response !== null ? selected.final_response : draft }}</p>
           <small v-if="streaming" class="streaming-status" role="status">正在生成</small>
         </article>
         <p v-if="selected.error_text" class="run-error" role="alert">{{ selected.error_text }}</p>
