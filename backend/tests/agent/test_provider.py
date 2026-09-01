@@ -3,12 +3,29 @@ from types import SimpleNamespace
 import pytest
 
 from app.agent.provider import DeepSeekClient, ModelProtocolError, ModelProviderError
-from app.agent.types import AssistantTurn
+from app.agent.types import AssistantTurn, ToolCall
 
 
 def _content_chunk(content):
     delta = SimpleNamespace(content=content, tool_calls=None)
     return SimpleNamespace(choices=[SimpleNamespace(delta=delta)])
+
+
+def _tool_chunk(index, *, call_id=None, name=None, arguments=None):
+    function = SimpleNamespace(name=name, arguments=arguments)
+    fragment = SimpleNamespace(index=index, id=call_id, function=function)
+    delta = SimpleNamespace(content=None, reasoning_content="private", tool_calls=[fragment])
+    return SimpleNamespace(choices=[SimpleNamespace(delta=delta)])
+
+
+def _client_returning(stream):
+    return SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **kwargs: stream))
+    )
+
+
+def _client_with_create(create):
+    return SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
 
 
 def test_complete_streams_visible_content_and_reconstructs_turn():
@@ -28,6 +45,64 @@ def test_complete_streams_visible_content_and_reconstructs_turn():
     assert captured["stream"] is True
     assert deltas == ["Hello", " world"]
     assert turn == AssistantTurn("Hello world")
+
+
+def test_complete_reconstructs_tools_without_emitting_reasoning():
+    """Replacing assembly with only the last fragment must fail this test."""
+    stream = iter(
+        [
+            _tool_chunk(0, call_id="call_1", name="write_file", arguments='{"pa'),
+            _tool_chunk(0, arguments='th":"a.txt","content":"ok"}'),
+        ]
+    )
+    deltas = []
+
+    turn = DeepSeekClient(_client_returning(stream), "deepseek-v4-flash").complete(
+        [], [], on_text_delta=deltas.append
+    )
+
+    assert deltas == []
+    assert turn.tool_calls == (
+        ToolCall("call_1", "write_file", '{"path":"a.txt","content":"ok"}'),
+    )
+
+
+def test_complete_rejects_tool_stream_without_id_or_name():
+    """Returning a ToolCall for incomplete streamed metadata must fail this test."""
+    stream = iter([_tool_chunk(0, arguments='{"path":"a.txt"}')])
+
+    with pytest.raises(ModelProtocolError) as captured:
+        DeepSeekClient(_client_returning(stream), "deepseek-v4-flash").complete([], [])
+
+    assert captured.value.code == "protocol_error"
+
+
+def test_complete_does_not_retry_after_visible_output(monkeypatch):
+    """Retrying after delivering a visible partial response must fail this test."""
+    import app.agent.provider as provider
+
+    calls = 0
+
+    def create(**kwargs):
+        nonlocal calls
+        calls += 1
+
+        def broken_stream():
+            yield _content_chunk("partial")
+            raise _connection_error()
+
+        return broken_stream()
+
+    monkeypatch.setattr(provider.time, "sleep", lambda delay: None)
+    deltas = []
+    with pytest.raises(ModelProviderError) as captured:
+        DeepSeekClient(_client_with_create(create), "deepseek-v4-flash").complete(
+            [], [], on_text_delta=deltas.append
+        )
+
+    assert deltas == ["partial"]
+    assert calls == 1
+    assert captured.value.code == "provider_unavailable"
 
 
 def test_from_settings_disables_sdk_retries(monkeypatch):
