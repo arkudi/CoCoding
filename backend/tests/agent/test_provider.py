@@ -103,11 +103,14 @@ def test_complete_retries_transient_errors_three_times(monkeypatch, error_factor
     import app.agent.provider as provider
 
     calls = 0
+    raised_errors = []
 
     def create(**kwargs):
         nonlocal calls
         calls += 1
-        raise error_factory()
+        error = error_factory()
+        raised_errors.append(error)
+        raise error
 
     monkeypatch.setattr(provider.time, "sleep", lambda delay: None)
     client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
@@ -118,10 +121,7 @@ def test_complete_retries_transient_errors_three_times(monkeypatch, error_factor
     assert calls == 3
     assert captured.value.code == "provider_unavailable"
     assert captured.value.safe_message == "The model provider is temporarily unavailable."
-    assert all(
-        raw_text not in str(captured.value)
-        for raw_text in ("rate limited", "server error", "invalid key", "invalid request")
-    )
+    assert str(raised_errors[-1]) not in str(captured.value)
 
 
 @pytest.mark.parametrize(

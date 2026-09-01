@@ -213,6 +213,20 @@ def test_resolved_symlink_alias_cannot_enter_ignored_directory(tmp_path):
         WorkspaceService(tmp_path).read_file("metadata/secret.txt")
 
 
+def test_listing_omits_symlink_alias_to_file_in_ignored_directory(tmp_path):
+    ignored = tmp_path / ".git"
+    ignored.mkdir()
+    secret = ignored / "secret.txt"
+    secret.write_text("secret", encoding="utf-8")
+    alias = tmp_path / "metadata.txt"
+    _create_symlink_or_skip(alias, secret)
+
+    assert WorkspaceService(tmp_path).list_files() == {
+        "files": [],
+        "truncated": False,
+    }
+
+
 def test_ignored_directory_case_variant_is_rejected_on_case_insensitive_filesystem(
     tmp_path,
 ):

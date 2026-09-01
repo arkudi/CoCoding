@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from app.agent.workspace import FileChangeEvidence
@@ -270,14 +270,15 @@ class RunRepository:
                 MessageRecord.role.in_(("user", "assistant")),
                 MessageRecord.tool_calls_json.is_(None),
                 MessageRecord.content.is_not(None),
-                func.trim(MessageRecord.content) != "",
             )
             .order_by(MessageRecord.created_at.desc(), MessageRecord.id.desc())
         )
         selected: list[MessageRecord] = []
         characters = 0
         for message in self.db.scalars(statement):
-            content = message.content or ""
+            content = message.content
+            if content is None or not content.strip():
+                continue
             if characters + len(content) > character_budget:
                 break
             selected.append(message)

@@ -92,6 +92,9 @@ class WorkspaceService:
                     continue
                 if not resolved_file.is_relative_to(self.root) or not resolved_file.is_file():
                     continue
+                resolved_parts = resolved_file.relative_to(self.root).parts
+                if any(_is_ignored_component(part) for part in resolved_parts):
+                    continue
                 relative = file_path.relative_to(self.root).as_posix()
                 if relative in seen:
                     continue

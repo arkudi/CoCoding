@@ -256,6 +256,7 @@ class AgentLoop:
 
     @staticmethod
     def _tool_payload(result: ToolResult) -> str:
+        """Keep the normalized envelope; oversized prefixes and lengths live in data."""
         serialized = result.to_json()
         if len(serialized) <= _TOOL_PAYLOAD_CHARACTER_LIMIT:
             return serialized

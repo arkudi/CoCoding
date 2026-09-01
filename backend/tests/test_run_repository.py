@@ -220,6 +220,28 @@ def test_completed_history_selects_newest_messages_within_budget_and_excludes_to
     ]
 
 
+def test_completed_history_excludes_whitespace_only_messages(
+    db: Session, workspace_session: SessionRecord
+) -> None:
+    repo = RunRepository(db)
+    run = repo.create_run(
+        session_id=workspace_session.id,
+        prompt="prompt",
+        model="fake",
+        prompt_version="v1",
+        max_steps=1,
+    )
+    repo.add_message(run.id, workspace_session.id, "user", "prompt")
+    repo.add_message(run.id, workspace_session.id, "assistant", "\n\t")
+    repo.add_message(run.id, workspace_session.id, "assistant", "terminal")
+    repo.finish_run(run.id, "completed", step_count=1)
+
+    assert repo.completed_history(workspace_session.id) == [
+        {"role": "user", "content": "prompt"},
+        {"role": "assistant", "content": "terminal"},
+    ]
+
+
 def test_add_message_rejects_a_session_that_does_not_own_the_run(
     db: Session, workspace_session: SessionRecord
 ) -> None:
