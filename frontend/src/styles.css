@@ -127,13 +127,13 @@ pre { margin: 0; font-family: "Cascadia Code", Consolas, monospace; font-size: 1
 @keyframes stream-cursor { 50% { opacity: 0; } }
 @media (max-width: 1080px) {
   .app-shell { grid-template-columns: minmax(14rem, 17rem) 1fr; height: auto; overflow: visible; }
-  .timeline { height: auto; min-height: 100vh; overflow: visible; }
+  .timeline { height: 100vh; min-height: 0; overflow-y: auto; }
   .workspace { grid-column: 1 / -1; min-height: 25rem; border-top: 1px solid var(--line); border-left: 0; }
 }
 @media (max-width: 720px) {
   .app-shell { display: block; height: auto; overflow: visible; }
   .sidebar, .timeline, .workspace { width: 100%; border: 0; }
-  .timeline { height: auto; min-height: 70vh; padding: 30px 18px; overflow: visible; }
+  .timeline { height: 70vh; min-height: 70vh; padding: 30px 18px; overflow-y: auto; }
   .user-message { margin-left: 18px; }
   .assistant-message { margin-right: 18px; }
   .workspace { min-height: 30rem; }

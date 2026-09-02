@@ -170,3 +170,26 @@ test('does not pull the reader away from earlier messages after they scroll up',
   await nextTick()
   expect(timeline.scrollTop).toBe(100)
 })
+
+test('opens a different session at its latest conversation', async () => {
+  const view = render(Timeline, { props: {
+    sessionId: 'session-a', title: 'Task A', history: [running], selected: running,
+    draft: 'Beginning', streaming: true, cancelling: false, error: null,
+  } })
+  const timeline = screen.getByRole('main', { name: '执行过程' })
+  Object.defineProperties(timeline, {
+    scrollHeight: { configurable: true, value: 1000 },
+    clientHeight: { configurable: true, value: 400 },
+    scrollTop: { configurable: true, value: 100, writable: true },
+  })
+  await fireEvent.scroll(timeline)
+
+  await view.rerender({
+    sessionId: 'session-b', title: 'Task B', history: [completed], selected: completed,
+    draft: '', streaming: false, cancelling: false, error: null,
+  })
+
+  await nextTick()
+  await nextTick()
+  expect(timeline.scrollTop).toBe(1000)
+})

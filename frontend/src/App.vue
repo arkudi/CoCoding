@@ -31,6 +31,7 @@ watch(
   <div class="app-shell">
     <Sidebar />
     <Timeline
+      :session-id="current?.id"
       :title="current?.title"
       :history="current ? runs.history_by_session[current.id] ?? [] : []"
       :selected="runs.selected"

@@ -5,6 +5,7 @@ import ToolChain from './ToolChain.vue'
 import type { Run, RunCreate } from '@/types/run'
 
 const props = defineProps<{
+  sessionId?: string
   title?: string
   history: Run[]
   selected: Run | null
@@ -38,6 +39,12 @@ watch([conversationRevision, () => props.draft], async () => {
   if (timelineElement.value && followsLatest.value) {
     timelineElement.value.scrollTop = timelineElement.value.scrollHeight
   }
+})
+
+watch(() => props.sessionId, async () => {
+  followsLatest.value = true
+  await nextTick()
+  if (timelineElement.value) timelineElement.value.scrollTop = timelineElement.value.scrollHeight
 })
 
 function updateFollowState() {
