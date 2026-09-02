@@ -83,7 +83,7 @@ def test_eval_runner_reports_multi_agent_roles_and_mode_metrics() -> None:
         expect=EvalExpectations(
             files_equal={"note.txt": "done"},
             required_agent_roles=["manager", "implementer", "reviewer"],
-            max_steps=6,
+            max_steps=7,
         ),
     )
     model = ScriptedModelClient(
@@ -122,6 +122,7 @@ def test_eval_runner_reports_multi_agent_roles_and_mode_metrics() -> None:
                 },
                 "delegate-reviewer",
             ),
+            tool_turn("get_diff", {}, "review-diff"),
             tool_turn(
                 "finish_subtask",
                 {
@@ -145,9 +146,9 @@ def test_eval_runner_reports_multi_agent_roles_and_mode_metrics() -> None:
 
     assert report.passed is True
     assert report.cases[0].agent_executions == 3
-    assert report.cases[0].step_count == 6
+    assert report.cases[0].step_count == 7
     assert report.modes == (
         report.modes[0],
     )
     assert report.modes[0].orchestration == "multi"
-    assert report.modes[0].average_steps == 6
+    assert report.modes[0].average_steps == 7

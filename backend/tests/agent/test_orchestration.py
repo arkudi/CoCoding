@@ -162,6 +162,7 @@ def test_finish_is_rejected_until_latest_implementation_is_reviewed(tmp_path: Pa
             finish_subtask("Created it.", "implementer-finish", changed_files=["note.txt"]),
             finish("Premature.", changed_files=["note.txt"], call_id="early-finish"),
             delegate("reviewer", "Review note.txt.", "delegate-reviewer"),
+            call("read_file", {"path": "note.txt"}, "review-read"),
             finish_subtask("Approved.", "reviewer-finish", verdict="approved"),
             finish("Reviewed and complete.", changed_files=["note.txt"], call_id="final-finish"),
         ]
@@ -242,3 +243,27 @@ def test_independent_read_only_workers_run_concurrently(tmp_path: Path) -> None:
         "manager", "explorer", "explorer",
     ]
     assert all(task.status == "completed" for task in detail.agent_tasks)
+
+
+def test_reviewer_cannot_approve_without_inspecting_evidence(tmp_path: Path) -> None:
+    model = ScriptedModelClient(
+        [
+            delegate("reviewer", "Review the workspace.", "delegate-reviewer"),
+            finish_subtask("Looks fine.", "empty-review", verdict="approved"),
+            call("get_diff", {}, "review-diff"),
+            finish_subtask("Evidence reviewed.", "review-finish", verdict="approved"),
+            finish("Review complete."),
+        ]
+    )
+    engine, service, session_id = service_context(tmp_path, model)
+    try:
+        detail = service.execute(session_id, "Review", max_steps=10)
+    finally:
+        engine.dispose()
+
+    assert detail.status == "completed"
+    rejected = next(
+        tool for tool in detail.tool_calls if tool.provider_call_id == "empty-review"
+    )
+    assert rejected.status == "failed"
+    assert "REVIEW_EVIDENCE_REQUIRED" in (rejected.result_json or "")

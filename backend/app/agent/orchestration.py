@@ -173,6 +173,9 @@ class SharedStepBudget:
 
     def consume_tool_call(self) -> bool:
         with self._lock:
+            if time.monotonic() - self._started >= self.wall_clock_limit_seconds:
+                self.last_error = "The shared wall-clock budget was exhausted."
+                return False
             if self.tool_calls_used >= self.tool_call_limit:
                 self.last_error = "The shared tool-call budget was exhausted."
                 return False
@@ -181,6 +184,9 @@ class SharedStepBudget:
 
     def consume_delegation(self, count: int = 1) -> bool:
         with self._lock:
+            if time.monotonic() - self._started >= self.wall_clock_limit_seconds:
+                self.last_error = "The shared wall-clock budget was exhausted."
+                return False
             if self.delegations_used + count > self.delegation_limit:
                 self.last_error = "The shared delegation budget was exhausted."
                 return False
@@ -386,6 +392,7 @@ class MultiAgentCoordinator:
         steps = 0
         result: FinishSubtaskArgs | None = None
         failure: ToolError | None = None
+        reviewer_evidence = 0
 
         for _ in range(self._child_step_limit):
             if self._cancellation.is_cancelled:
@@ -424,7 +431,18 @@ class MultiAgentCoordinator:
                 if worker_call.name == "finish_subtask":
                     try:
                         result = FinishSubtaskArgs.model_validate_json(worker_call.arguments_json)
-                        if arguments.role == "reviewer" and result.verdict is None:
+                        if arguments.role == "reviewer" and reviewer_evidence == 0:
+                            result = None
+                            tool_result = ToolResult(
+                                False,
+                                None,
+                                ToolError(
+                                    "REVIEW_EVIDENCE_REQUIRED",
+                                    "A Reviewer must successfully inspect file, diff, or test evidence before returning a verdict.",
+                                ),
+                                0,
+                            )
+                        elif arguments.role == "reviewer" and result.verdict is None:
                             result = None
                             tool_result = ToolResult(
                                 False,
@@ -443,6 +461,13 @@ class MultiAgentCoordinator:
                         )
                 else:
                     tool_result = self._registry.execute(worker_call, allowed_tools)
+                    if (
+                        arguments.role == "reviewer"
+                        and tool_result.ok
+                        and worker_call.name
+                        in {"read_file", "git_diff", "get_diff", "run_tests"}
+                    ):
+                        reviewer_evidence += 1
                 payload = tool_result.to_json()
                 finished = self._repo_call(self._repository.finish_tool_call,
                     record.id,
