@@ -8,7 +8,8 @@ test('submits a trimmed task prompt', async () => {
   const view = render(RunComposer, { props: { running: false, cancelling: false } })
   await user.type(screen.getByLabelText('任务描述'), '  inspect project  ')
   await user.click(screen.getByRole('button', { name: '运行任务' }))
-  expect(view.emitted().submit?.[0]).toEqual([{ prompt: 'inspect project', max_steps: 20 }])
+  expect(view.emitted().submit?.[0]).toEqual([{ prompt: 'inspect project' }])
+  expect(screen.queryByLabelText('最大步数')).toBeNull()
 })
 
 test('shows the cooperative cancelling state', () => {

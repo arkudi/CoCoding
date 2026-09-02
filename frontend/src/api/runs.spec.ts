@@ -15,10 +15,11 @@ test('creates and lists runs with encoded identifiers', async () => {
     .mockResolvedValueOnce(new Response(JSON.stringify([run]), { status: 200 }))
   vi.stubGlobal('fetch', fetchMock)
 
-  await createRun('session / one', { prompt: 'inspect', max_steps: 20 })
+  await createRun('session / one', { prompt: 'inspect' })
   await listRuns('session / one')
 
   expect(fetchMock.mock.calls[0][0]).toBe('/api/sessions/session%20%2F%20one/runs')
+  expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ prompt: 'inspect' })
   expect(fetchMock.mock.calls[1][0]).toBe('/api/sessions/session%20%2F%20one/runs')
 })
 

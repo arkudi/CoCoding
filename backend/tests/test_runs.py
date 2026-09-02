@@ -56,7 +56,7 @@ def test_submit_run_and_reload_complete_evidence(app_factory, tmp_path: Path) ->
         session = _create_session(client, workspace)
         response = client.post(
             f"/api/sessions/{session['id']}/runs",
-            json={"prompt": "  update it  ", "max_steps": 20},
+            json={"prompt": "  update it  "},
         )
 
         assert response.status_code == 202
@@ -65,6 +65,7 @@ def test_submit_run_and_reload_complete_evidence(app_factory, tmp_path: Path) ->
 
     assert evidence["prompt"] == "update it"
     assert evidence["status"] == "completed"
+    assert evidence["max_steps"] == 50
     assert evidence["final_response"] == "Updated a.txt."
     assert evidence["step_count"] == 2
     assert evidence["messages"][0]["role"] == "user"
@@ -135,26 +136,22 @@ def test_run_endpoint_returns_404_for_missing_session_and_run(app_factory, tmp_p
     assert missing_run.json()["detail"] == "Run not found"
 
 
-def test_run_request_rejects_blank_prompt_and_step_count_outside_range(app_factory, tmp_path: Path) -> None:
+def test_run_request_rejects_blank_prompt_and_user_step_limit(app_factory, tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
 
     with app_factory(ScriptedModelClient([])) as client:
         session = _create_session(client, workspace)
         blank = client.post(f"/api/sessions/{session['id']}/runs", json={"prompt": "   "})
-        too_few = client.post(
+        user_step_limit = client.post(
             f"/api/sessions/{session['id']}/runs", json={"prompt": "x", "max_steps": 0}
-        )
-        too_many = client.post(
-            f"/api/sessions/{session['id']}/runs", json={"prompt": "x", "max_steps": 51}
         )
         oversized_prompt = client.post(
             f"/api/sessions/{session['id']}/runs", json={"prompt": "x" * 20_001}
         )
 
     assert blank.status_code == 422
-    assert too_few.status_code == 422
-    assert too_many.status_code == 422
+    assert user_step_limit.status_code == 422
     assert oversized_prompt.status_code == 422
 
 

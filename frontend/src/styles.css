@@ -106,8 +106,7 @@ pre { margin: 0; font-family: "Cascadia Code", Consolas, monospace; font-size: 1
 .run-composer { display: grid; gap: 9px; width: 100%; padding: 17px; border: 1px solid #bdb6a7; background: rgba(248, 245, 235, .97); box-shadow: var(--shadow); }
 .run-composer > label { font-size: 12px; font-weight: 700; }
 .run-composer textarea { resize: vertical; min-height: 90px; }
-.composer-actions { display: grid; grid-template-columns: auto 74px 1fr; gap: 10px; align-items: center; }
-.composer-actions label { color: var(--muted); font-size: 11px; }
+.composer-actions { display: flex; justify-content: flex-end; gap: 10px; align-items: center; }
 
 .tabs { display: flex; gap: 19px; border-bottom: 1px solid var(--line); }
 .tab { padding: 0 0 11px; border: 0; color: var(--muted); background: transparent; cursor: pointer; }
@@ -138,8 +137,7 @@ pre { margin: 0; font-family: "Cascadia Code", Consolas, monospace; font-size: 1
   .assistant-message { margin-right: 18px; }
   .workspace { min-height: 30rem; }
   .timeline-header { align-items: flex-end; }
-  .composer-actions { grid-template-columns: 1fr 70px; }
-  .composer-actions .primary, .composer-actions .danger { grid-column: 1 / -1; }
+  .composer-actions .primary, .composer-actions .danger { width: 100%; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }

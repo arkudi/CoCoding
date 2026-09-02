@@ -13,3 +13,12 @@ def test_deepseek_settings_use_documented_unprefixed_environment_names(
     assert settings.deepseek_api_key == "test-secret"
     assert settings.deepseek_base_url == "https://deepseek.test/v1"
     assert settings.deepseek_model == "deepseek-test"
+    assert settings.agent_hard_step_limit == 50
+
+
+def test_agent_hard_step_limit_uses_prefixed_environment_name(monkeypatch) -> None:
+    monkeypatch.setenv("COCODING_AGENT_HARD_STEP_LIMIT", "80")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.agent_hard_step_limit == 80

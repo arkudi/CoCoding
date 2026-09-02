@@ -59,7 +59,7 @@ test('submits, selects, and subscribes to a running run', async () => {
   api.createRun.mockResolvedValue(running)
   const store = useRunsStore()
 
-  await store.submit('session-1', { prompt: 'inspect', max_steps: 20 })
+  await store.submit('session-1', { prompt: 'inspect' })
 
   expect(store.selected_id).toBe('run-1')
   expect(api.connectRunEvents).toHaveBeenCalled()
@@ -70,7 +70,7 @@ test('reconciles durable state after a terminal event', async () => {
   const completed = { ...running, status: 'completed' as const, final_response: 'Done.' }
   api.getRun.mockResolvedValue(completed)
   const store = useRunsStore()
-  await store.submit('session-1', { prompt: 'inspect', max_steps: 20 })
+  await store.submit('session-1', { prompt: 'inspect' })
 
   handlers.onEvent({
     type: 'run.finished', run_id: 'run-1', occurred_at: running.updated_at,
@@ -90,7 +90,7 @@ test('ignores an older reconciliation response that finishes last', async () => 
     .mockReturnValueOnce(older.promise)
     .mockReturnValueOnce(newer.promise)
   const store = useRunsStore()
-  await store.submit('session-1', { prompt: 'inspect', max_steps: 20 })
+  await store.submit('session-1', { prompt: 'inspect' })
 
   handlers.onEvent(event('run.resync_required', {}))
   handlers.onEvent(event('run.finished', {}))
@@ -116,7 +116,7 @@ test('deferred reconciliation for another run cannot disconnect the selection', 
   const pending = deferred<Run>()
   api.getRun.mockReturnValueOnce(pending.promise)
   const store = useRunsStore()
-  await store.submit('session-1', { prompt: 'inspect', max_steps: 20 })
+  await store.submit('session-1', { prompt: 'inspect' })
 
   handlers.onEvent(event('run.finished', {}))
   await vi.waitFor(() => expect(api.getRun).toHaveBeenCalledTimes(1))
@@ -150,7 +150,7 @@ test('accumulates assistant deltas until terminal reconciliation', async () => {
     ...running, status: 'completed', final_response: 'Hello world',
   })
   const store = useRunsStore()
-  await store.submit('session-1', { prompt: 'inspect', max_steps: 20 })
+  await store.submit('session-1', { prompt: 'inspect' })
 
   handlers.onEvent(event('assistant.started', {}))
   handlers.onEvent(event('assistant.delta', { delta: 'Hello' }))
@@ -166,7 +166,7 @@ test('accumulates assistant deltas until terminal reconciliation', async () => {
 test('keeps the live draft when a durable message arrives', async () => {
   api.createRun.mockResolvedValue(running)
   const store = useRunsStore()
-  await store.submit('session-1', { prompt: 'inspect', max_steps: 20 })
+  await store.submit('session-1', { prompt: 'inspect' })
 
   handlers.onEvent(event('assistant.started', {}))
   handlers.onEvent(event('assistant.delta', { delta: 'Hello' }))
@@ -181,7 +181,7 @@ test('keeps the live draft when a durable message arrives', async () => {
 test('replaces a stale draft when a new assistant turn starts', async () => {
   api.createRun.mockResolvedValue(running)
   const store = useRunsStore()
-  await store.submit('session-1', { prompt: 'inspect', max_steps: 20 })
+  await store.submit('session-1', { prompt: 'inspect' })
 
   handlers.onEvent(event('assistant.started', {}))
   handlers.onEvent(event('assistant.delta', { delta: 'stale' }))
@@ -193,7 +193,7 @@ test('replaces a stale draft when a new assistant turn starts', async () => {
 test('clears a stale draft when an authoritative snapshot arrives', async () => {
   api.createRun.mockResolvedValue(running)
   const store = useRunsStore()
-  await store.submit('session-1', { prompt: 'inspect', max_steps: 20 })
+  await store.submit('session-1', { prompt: 'inspect' })
 
   handlers.onEvent(event('assistant.started', {}))
   handlers.onEvent(event('assistant.delta', { delta: 'stale' }))
@@ -209,7 +209,7 @@ test.each(['failed', 'cancelled'] as const)(
     api.createRun.mockResolvedValue(running)
     api.getRun.mockResolvedValue({ ...running, status })
     const store = useRunsStore()
-    await store.submit('session-1', { prompt: 'inspect', max_steps: 20 })
+    await store.submit('session-1', { prompt: 'inspect' })
 
     handlers.onEvent(event('assistant.started', {}))
     handlers.onEvent(event('assistant.delta', { delta: 'stale' }))
@@ -222,7 +222,7 @@ test.each(['failed', 'cancelled'] as const)(
 test('clears the stale draft when the selected run changes', async () => {
   api.createRun.mockResolvedValue(running)
   const store = useRunsStore()
-  await store.submit('session-1', { prompt: 'inspect', max_steps: 20 })
+  await store.submit('session-1', { prompt: 'inspect' })
   handlers.onEvent(event('assistant.started', {}))
   handlers.onEvent(event('assistant.delta', { delta: 'stale' }))
   store.details['run-2'] = { ...running, id: 'run-2', status: 'completed' }
@@ -236,7 +236,7 @@ test('clears the stale draft when the selected run changes', async () => {
 test('clears the stale draft on explicit disconnect', async () => {
   api.createRun.mockResolvedValue(running)
   const store = useRunsStore()
-  await store.submit('session-1', { prompt: 'inspect', max_steps: 20 })
+  await store.submit('session-1', { prompt: 'inspect' })
   handlers.onEvent(event('assistant.started', {}))
   handlers.onEvent(event('assistant.delta', { delta: 'stale' }))
 
@@ -249,7 +249,7 @@ test('clears the stale draft on explicit disconnect', async () => {
 test('preserves the draft while a closed socket schedules reconnect', async () => {
   api.createRun.mockResolvedValue(running)
   const store = useRunsStore()
-  await store.submit('session-1', { prompt: 'inspect', max_steps: 20 })
+  await store.submit('session-1', { prompt: 'inspect' })
   handlers.onEvent(event('assistant.started', {}))
   handlers.onEvent(event('assistant.delta', { delta: 'Hello' }))
 
@@ -265,7 +265,7 @@ test('reconnect exhaustion performs one final successful reconciliation', async 
     ...running, status: 'completed', final_response: 'Recovered durable response',
   })
   const store = useRunsStore()
-  await store.submit('session-1', { prompt: 'inspect', max_steps: 20 })
+  await store.submit('session-1', { prompt: 'inspect' })
   handlers.onEvent(event('assistant.started', {}))
   handlers.onEvent(event('assistant.delta', { delta: 'partial' }))
 
@@ -287,7 +287,7 @@ test('reconnect exhaustion clears the active draft when final reconciliation fai
   api.createRun.mockResolvedValue(running)
   api.getRun.mockRejectedValue(new Error('最终同步失败'))
   const store = useRunsStore()
-  await store.submit('session-1', { prompt: 'inspect', max_steps: 20 })
+  await store.submit('session-1', { prompt: 'inspect' })
   handlers.onEvent(event('assistant.started', {}))
   handlers.onEvent(event('assistant.delta', { delta: 'partial' }))
 
@@ -306,7 +306,7 @@ test('reconnect exhaustion clears the active draft when final reconciliation fai
 test('rejects malformed assistant deltas without changing the draft', async () => {
   api.createRun.mockResolvedValue(running)
   const store = useRunsStore()
-  await store.submit('session-1', { prompt: 'inspect', max_steps: 20 })
+  await store.submit('session-1', { prompt: 'inspect' })
   handlers.onEvent(event('assistant.started', {}))
   handlers.onEvent(event('assistant.delta', { delta: 'Hello' }))
 
@@ -320,7 +320,7 @@ test('requests cancellation once while pending', async () => {
   api.createRun.mockResolvedValue(running)
   api.cancelRun.mockResolvedValue({ run_id: 'run-1', status: 'running', requested: true })
   const store = useRunsStore()
-  await store.submit('session-1', { prompt: 'inspect', max_steps: 20 })
+  await store.submit('session-1', { prompt: 'inspect' })
 
   await store.requestCancel()
 

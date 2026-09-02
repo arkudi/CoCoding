@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     app_name: str = "CoCoding"
     database_url: str = "sqlite:///./data/cocoding.db"
     frontend_dist: Path = Path("frontend/dist")
+    agent_hard_step_limit: int = Field(default=50, ge=1, le=500)
     deepseek_api_key: str | None = Field(default=None, validation_alias="DEEPSEEK_API_KEY")
     deepseek_base_url: str = Field(
         default="https://api.deepseek.com", validation_alias="DEEPSEEK_BASE_URL"

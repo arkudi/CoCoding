@@ -51,9 +51,10 @@ def test_start_returns_before_background_model_completes(manager_context) -> Non
     manager, session_factory, session_id = manager_context
     model = BlockingModel(AssistantTurn("Finished."))
 
-    detail = manager.start(session_id, "inspect", 20, model)
+    detail = manager.start(session_id, "inspect", model)
 
     assert detail.status == "running"
+    assert detail.max_steps == 50
     assert model.entered.wait(1)
     assert manager.active_run_id == detail.id
     model.release.set()
@@ -65,11 +66,11 @@ def test_start_returns_before_background_model_completes(manager_context) -> Non
 def test_second_start_is_rejected_without_creating_run(manager_context) -> None:
     manager, session_factory, session_id = manager_context
     model = BlockingModel(AssistantTurn("Finished."))
-    first = manager.start(session_id, "first", 20, model)
+    first = manager.start(session_id, "first", model)
     assert model.entered.wait(1)
 
     with pytest.raises(AgentBusyError):
-        manager.start(session_id, "second", 20, model)
+        manager.start(session_id, "second", model)
 
     with session_factory() as db:
         assert [run.id for run in RunRepository(db).list_runs(session_id)] == [first.id]
@@ -85,7 +86,7 @@ def test_cancel_is_cooperative_and_idempotent(manager_context) -> None:
             (ToolCall("read-1", "read_file", '{"path":"missing.txt"}'),),
         )
     )
-    run = manager.start(session_id, "work", 20, model)
+    run = manager.start(session_id, "work", model)
     assert model.entered.wait(1)
 
     assert manager.cancel(run.id).requested is True

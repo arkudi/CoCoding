@@ -62,7 +62,6 @@ export interface Run {
 
 export interface RunCreate {
   prompt: string
-  max_steps: number
 }
 
 export interface RunCancelResult {

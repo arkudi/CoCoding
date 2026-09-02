@@ -33,6 +33,7 @@ def create_app(
         application.state.run_manager = RunManager(
             application.state.session_factory,
             application.state.event_hub,
+            hard_step_limit=resolved.agent_hard_step_limit,
         )
         db = application.state.session_factory()
         try:

@@ -105,7 +105,7 @@ class AgentLoop:
         messages = [
             {
                 "role": "system",
-                "content": build_system_prompt(self._workspace.root, max_steps),
+                "content": build_system_prompt(self._workspace.root),
             },
             *self._bounded_prior_messages(prior_messages),
             {"role": "user", "content": prompt},

@@ -44,9 +44,11 @@ class RunManager:
         self,
         session_factory: sessionmaker,
         event_hub: RunEventHub,
+        hard_step_limit: int = 50,
     ) -> None:
         self._session_factory = session_factory
         self._hub = event_hub
+        self._hard_step_limit = hard_step_limit
         self._executor = ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="cocoding-agent"
         )
@@ -59,7 +61,6 @@ class RunManager:
         self,
         session_id: str,
         prompt: str,
-        max_steps: int,
         model_client: ModelClient,
     ) -> RunDetail:
         with self._state_lock:
@@ -68,7 +69,7 @@ class RunManager:
             if self._active is not None:
                 raise AgentBusyError()
             service = AgentService(self._session_factory, model_client)
-            detail = service.create_run(session_id, prompt, max_steps)
+            detail = service.create_run(session_id, prompt, self._hard_step_limit)
             token = CancellationToken()
             active = _ActiveRun(detail.id, token)
             self._active = active

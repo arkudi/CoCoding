@@ -72,7 +72,7 @@ $session = curl.exe -sS -X POST http://127.0.0.1:8000/api/sessions `
 
 curl.exe -sS -X POST "http://127.0.0.1:8000/api/sessions/$($session.id)/runs" `
   -H "Content-Type: application/json" `
-  -d '{"prompt":"Inspect the project and report how to run its tests.","max_steps":20}'
+  -d '{"prompt":"Inspect the project and report how to run its tests."}'
 ```
 
 The returned Run initially has status `running`. Follow `ws://127.0.0.1:8000/api/runs/{run_id}/events`, or query `GET /api/runs/{run_id}`. Run history is available from `GET /api/sessions/{session_id}/runs`.
@@ -89,6 +89,10 @@ the durable SQLite record. Tool-call arguments and model reasoning are never
 streamed to the interface.
 
 Cancellation uses `POST /api/runs/{run_id}/cancel`. It is cooperative: the current DeepSeek request or tool call finishes first, and the Agent stops at the next safe boundary. Cancellation does not undo completed file writes; inspect their Diff in the workspace panel.
+
+The Agent decides when work is complete by submitting `finish_task`; clients do not
+choose a turn count. The runtime retains a safety-only hard limit of 50 model turns to
+prevent an unbounded loop. Override it with `COCODING_AGENT_HARD_STEP_LIMIT` when needed.
 
 Security boundary: agent command execution is **not sandboxed**. Commands start with the session workspace as their current directory, but they retain the host user's filesystem and process access; file-tool path containment does not contain commands. Use this runtime only with trusted local workspaces and prompts. The runtime permits only one active agent run per process; keep production at `--workers 1`.
 
