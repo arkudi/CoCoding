@@ -176,7 +176,11 @@ class AgentLoop:
                 if token.is_cancelled:
                     return self._finish(run_id, step_count, "cancelled", None, _CANCELLED_ERROR)
                 tool_call = self._repository.start_tool_call(
-                    run_id, call.id, call.name, call.arguments_json
+                    run_id,
+                    call.id,
+                    call.name,
+                    call.arguments_json,
+                    agent_execution_id=self._execution_id,
                 )
                 self._emit("tool.started", run_id, self._record_data(tool_call))
                 if call.name == "finish_task":

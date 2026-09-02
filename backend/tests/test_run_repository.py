@@ -164,6 +164,79 @@ def test_agent_execution_requires_terminal_finish_status(
         repo.finish_agent_execution(execution.id, "running", step_count=1)
 
 
+def test_repository_attributes_tool_calls_to_agent_without_altering_tool_table(
+    db: Session, workspace_session: SessionRecord
+) -> None:
+    repo = RunRepository(db)
+    run = repo.create_run(
+        session_id=workspace_session.id, prompt="work", model="fake",
+        prompt_version="v1", max_steps=20,
+    )
+    execution = repo.start_agent_execution(run.id, role="explorer", task="inspect")
+
+    call = repo.start_tool_call(
+        run.id, "provider-call", "read_file", "{}", agent_execution_id=execution.id
+    )
+
+    detail = repo.get_run_detail(run.id)
+    assert detail is not None
+    assert detail.tool_calls[0].id == call.id
+    assert detail.tool_calls[0].agent_execution_id == execution.id
+
+
+def test_repository_persists_task_dependencies_and_lifecycle(
+    db: Session, workspace_session: SessionRecord
+) -> None:
+    repo = RunRepository(db)
+    run = repo.create_run(
+        session_id=workspace_session.id, prompt="work", model="fake",
+        prompt_version="v1", max_steps=20,
+    )
+    manager = repo.start_agent_execution(run.id, role="manager", task="work")
+    first = repo.create_agent_task(
+        run.id, role="explorer", description="inspect", expected_output="findings"
+    )
+    first_execution = repo.start_agent_execution(
+        run.id, role="explorer", task="inspect", parent_execution_id=manager.id
+    )
+    repo.start_agent_task(first.id, first_execution.id)
+    repo.finish_agent_task(first.id, "completed", result_json='{"ok":true}')
+    second = repo.create_agent_task(
+        run.id,
+        role="implementer",
+        description="edit",
+        expected_output="change",
+        depends_on=(first.id,),
+    )
+
+    detail = repo.get_run_detail(run.id)
+    assert detail is not None
+    assert detail.agent_tasks[0].status == "completed"
+    assert detail.agent_tasks[1].depends_on == (first.id,)
+    assert second.status == "pending"
+
+
+def test_agent_task_cannot_start_before_dependency_completes(
+    db: Session, workspace_session: SessionRecord
+) -> None:
+    repo = RunRepository(db)
+    run = repo.create_run(
+        session_id=workspace_session.id, prompt="work", model="fake",
+        prompt_version="v1", max_steps=20,
+    )
+    dependency = repo.create_agent_task(
+        run.id, role="explorer", description="inspect", expected_output="findings"
+    )
+    blocked = repo.create_agent_task(
+        run.id, role="reviewer", description="review", expected_output="verdict",
+        depends_on=(dependency.id,),
+    )
+    execution = repo.start_agent_execution(run.id, role="reviewer", task="review")
+
+    with pytest.raises(ValueError, match="dependencies are not completed"):
+        repo.start_agent_task(blocked.id, execution.id)
+
+
 def test_each_mutation_helper_leaves_no_open_database_transaction(
     db: Session, workspace_session: SessionRecord
 ) -> None:

@@ -68,6 +68,7 @@ class DelegateTaskArgs(_StrictModel):
     role: WorkerRole
     task: str = Field(min_length=1, max_length=8_000)
     expected_output: str = Field(min_length=1, max_length=2_000)
+    depends_on: list[str] = Field(default_factory=list, max_length=20)
 
 
 class FinishSubtaskArgs(_StrictModel):
@@ -173,16 +174,29 @@ class MultiAgentCoordinator:
                 ToolError("INVALID_TOOL_ARGUMENTS", "delegate_task arguments must match the required schema."),
                 0,
             )
+        try:
+            task = self._repository.create_agent_task(
+                self._run_id,
+                role=arguments.role,
+                description=arguments.task,
+                expected_output=arguments.expected_output,
+                depends_on=tuple(arguments.depends_on),
+            )
+        except ValueError as error:
+            return ToolResult(False, None, ToolError("INVALID_TASK_DEPENDENCY", str(error)), 0)
+        self._emit("task.created", asdict(self._repository._agent_task_detail(task)))
         self._delegations += 1
-        return self._run_worker(arguments)
+        return self._run_worker(arguments, task.id)
 
-    def _run_worker(self, arguments: DelegateTaskArgs) -> ToolResult:
+    def _run_worker(self, arguments: DelegateTaskArgs, task_id: str) -> ToolResult:
         execution = self._repository.start_agent_execution(
             self._run_id,
             role=arguments.role,
             task=arguments.task,
             parent_execution_id=self._parent_execution_id,
         )
+        task = self._repository.start_agent_task(task_id, execution.id)
+        self._emit("task.started", asdict(self._repository._agent_task_detail(task)))
         self._emit("agent.started", asdict(self._repository._agent_execution_detail(execution)))
         messages: list[dict[str, object]] = [
             {"role": "system", "content": _worker_prompt(self._workspace, arguments.role)},
@@ -220,7 +234,11 @@ class MultiAgentCoordinator:
                 continue
             for worker_call in turn.tool_calls:
                 record = self._repository.start_tool_call(
-                    self._run_id, worker_call.id, worker_call.name, worker_call.arguments_json
+                    self._run_id,
+                    worker_call.id,
+                    worker_call.name,
+                    worker_call.arguments_json,
+                    agent_execution_id=execution.id,
                 )
                 self._emit("tool.started", self._record_data(record))
                 if worker_call.name == "finish_subtask":
@@ -255,6 +273,7 @@ class MultiAgentCoordinator:
         if result is not None:
             payload_data = {
                 "execution_id": execution.id,
+                "task_id": task_id,
                 "role": arguments.role,
                 "result": result.model_dump(),
             }
@@ -264,6 +283,15 @@ class MultiAgentCoordinator:
                 step_count=steps,
                 final_result_json=json.dumps(payload_data, ensure_ascii=False),
             )
+            finished_task = self._repository.finish_agent_task(
+                task_id,
+                "completed",
+                result_json=json.dumps(payload_data, ensure_ascii=False),
+            )
+            self._emit(
+                "task.finished",
+                asdict(self._repository._agent_task_detail(finished_task)),
+            )
             self._emit(
                 "agent.finished",
                 asdict(self._repository._agent_execution_detail(finished_execution)),
@@ -271,7 +299,11 @@ class MultiAgentCoordinator:
             return ToolResult(True, payload_data, None, 0)
 
         failure = failure or ToolError("CHILD_STEP_LIMIT", "The worker reached its model-turn limit.")
-        payload_data = {"execution_id": execution.id, "role": arguments.role}
+        payload_data = {
+            "execution_id": execution.id,
+            "task_id": task_id,
+            "role": arguments.role,
+        }
         terminal_status = "cancelled" if failure.code == "CANCELLED" else "failed"
         finished_execution = self._repository.finish_agent_execution(
             execution.id,
@@ -280,6 +312,17 @@ class MultiAgentCoordinator:
             final_result_json=json.dumps(
                 {**payload_data, "error": asdict(failure)}, ensure_ascii=False
             ),
+        )
+        finished_task = self._repository.finish_agent_task(
+            task_id,
+            terminal_status,
+            result_json=json.dumps(
+                {**payload_data, "error": asdict(failure)}, ensure_ascii=False
+            ),
+        )
+        self._emit(
+            "task.finished",
+            asdict(self._repository._agent_task_detail(finished_task)),
         )
         self._emit(
             "agent.finished",
