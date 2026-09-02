@@ -16,7 +16,7 @@ from app.agent.workspace import WorkspaceService
 from app.db.database import create_schema
 from app.db.models import SessionRecord
 from app.db.run_repository import RunRepository
-from tests.agent.fakes import ScriptedModelClient
+from tests.agent.fakes import ScriptedModelClient, finish
 
 
 @dataclass
@@ -62,7 +62,7 @@ def test_loop_emits_committed_execution_events(run_context) -> None:
                 None,
                 (execute("write_file", {"path": "note.txt", "content": "updated"}, "c1"),),
             ),
-            AssistantTurn("Done."),
+            finish("Done.", changed_files=["note.txt"]),
         ]
     )
     loop = AgentLoop(
@@ -94,6 +94,9 @@ def test_loop_emits_committed_execution_events(run_context) -> None:
         "assistant.delta",
         "message.created",
         "assistant.finished",
+        "tool.started",
+        "tool.finished",
+        "message.created",
         "files.changed",
         "run.finished",
     ]
@@ -107,7 +110,7 @@ def test_loop_executes_tool_then_completes(run_context):
     (run_context.workspace.root / "a.txt").write_text("hello", encoding="utf-8")
     model = ScriptedModelClient([
         AssistantTurn(None, (execute("read_file", {"path": "a.txt"}, "c1"),)),
-        AssistantTurn("Read the file; no changes were needed."),
+        finish("Read the file; no changes were needed."),
     ])
     loop = AgentLoop(model, run_context.registry, run_context.repository, run_context.workspace)
 
@@ -121,7 +124,9 @@ def test_loop_executes_tool_then_completes(run_context):
     assert model.calls[1]["messages"][-1]["role"] == "tool"
     assert model.calls[1]["messages"][-1]["tool_call_id"] == "c1"
     detail = run_context.repository.get_run_detail(run_context.run.id)
-    assert [message.role for message in detail.messages] == ["user", "assistant", "tool", "assistant"]
+    assert [message.role for message in detail.messages] == [
+        "user", "assistant", "tool", "assistant", "tool"
+    ]
 
 
 def test_loop_executes_multiple_tool_calls_sequentially(run_context):
@@ -130,7 +135,7 @@ def test_loop_executes_multiple_tool_calls_sequentially(run_context):
             execute("write_file", {"path": "first.txt", "content": "one"}, "c1"),
             execute("write_file", {"path": "second.txt", "content": "two"}, "c2"),
         )),
-        AssistantTurn("Created both files."),
+        finish("Created both files.", changed_files=["first.txt", "second.txt"]),
     ])
     loop = AgentLoop(model, run_context.registry, run_context.repository, run_context.workspace)
 
@@ -138,7 +143,7 @@ def test_loop_executes_multiple_tool_calls_sequentially(run_context):
 
     detail = run_context.repository.get_run_detail(run_context.run.id)
     assert result.status == "completed"
-    assert [call.provider_call_id for call in detail.tool_calls] == ["c1", "c2"]
+    assert [call.provider_call_id for call in detail.tool_calls] == ["c1", "c2", "finish-task"]
     assert (run_context.workspace.root / "first.txt").read_text() == "one"
     assert (run_context.workspace.root / "second.txt").read_text() == "two"
 
@@ -147,7 +152,7 @@ def test_loop_continues_after_recoverable_tool_failure(run_context):
     model = ScriptedModelClient([
         AssistantTurn(None, (execute("read_file", {"path": "missing.txt"}, "c1"),)),
         AssistantTurn(None, (execute("write_file", {"path": "missing.txt", "content": "fixed"}, "c2"),)),
-        AssistantTurn("Corrected the missing file."),
+        finish("Corrected the missing file.", changed_files=["missing.txt"]),
     ])
     loop = AgentLoop(model, run_context.registry, run_context.repository, run_context.workspace)
 
@@ -355,14 +360,14 @@ def test_loop_checks_cancellation_before_each_tool_call(run_context, monkeypatch
 
 
 def test_assistant_turn_persists_exactly_once_and_history_precedes_current_user(run_context):
-    model = ScriptedModelClient([AssistantTurn("Complete.")])
+    model = ScriptedModelClient([finish("Complete.")])
     loop = AgentLoop(model, run_context.registry, run_context.repository, run_context.workspace)
     history = [{"role": "user", "content": "old user"}, {"role": "assistant", "content": "old assistant"}]
 
     loop.run(run_id=run_context.run.id, session_id=run_context.session.id, prompt="current user", prior_messages=history, max_steps=20)
 
     detail = run_context.repository.get_run_detail(run_context.run.id)
-    assert [message.role for message in detail.messages] == ["user", "assistant"]
+    assert [message.role for message in detail.messages] == ["user", "assistant", "tool"]
     assert len([message for message in detail.messages if message.role == "assistant"]) == 1
     messages = model.calls[0]["messages"]
     assert [message["role"] for message in messages] == ["system", "user", "assistant", "user"]
@@ -371,7 +376,7 @@ def test_assistant_turn_persists_exactly_once_and_history_precedes_current_user(
 
 
 def test_loop_uses_bounded_user_and_assistant_history_only(run_context):
-    model = ScriptedModelClient([AssistantTurn("Complete.")])
+    model = ScriptedModelClient([finish("Complete.")])
     loop = AgentLoop(model, run_context.registry, run_context.repository, run_context.workspace)
     history = [
         {"role": "tool", "content": "omit this"},
@@ -394,7 +399,7 @@ def test_loop_uses_one_valid_bounded_payload_for_oversized_tool_result(run_conte
     monkeypatch.setattr(run_context.registry, "execute", lambda call: oversized)
     model = ScriptedModelClient([
         AssistantTurn(None, (execute("read_file", {"path": "large.txt"}, "c1"),)),
-        AssistantTurn("Handled the result."),
+        finish("Handled the result."),
     ])
     loop = AgentLoop(model, run_context.registry, run_context.repository, run_context.workspace)
 
@@ -420,7 +425,7 @@ def test_loop_preserves_non_oversized_tool_payload_exactly(run_context, monkeypa
     monkeypatch.setattr(run_context.registry, "execute", lambda call: result)
     model = ScriptedModelClient([
         AssistantTurn(None, (execute("read_file", {"path": "small.txt"}, "c1"),)),
-        AssistantTurn("Handled the result."),
+        finish("Handled the result."),
     ])
     loop = AgentLoop(model, run_context.registry, run_context.repository, run_context.workspace)
 

@@ -26,6 +26,10 @@ _CANCELLED_ERROR = "The run was cancelled."
 _PROVIDER_ERROR = "The model provider request failed."
 _TOOL_ERROR = "The tool could not be executed."
 _INTERNAL_ERROR = "The run failed because of an internal error."
+_FINISH_REQUIRED = (
+    "[Runtime verification] A plain response cannot complete this Run. "
+    "Call finish_task with evidence-backed completion details."
+)
 _PRIOR_HISTORY_CHARACTER_LIMIT = 40_000
 _TOOL_PAYLOAD_CHARACTER_LIMIT = 20_000
 
@@ -141,7 +145,8 @@ class AgentLoop:
             if not turn.tool_calls:
                 if turn.content is None or not turn.content.strip():
                     return self._finish(run_id, step_count, "failed", None, _EMPTY_FINAL_RESPONSE)
-                return self._finish(run_id, step_count, "completed", turn.content, None)
+                messages.append({"role": "user", "content": _FINISH_REQUIRED})
+                continue
 
             for call in turn.tool_calls:
                 if token.is_cancelled:

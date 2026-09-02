@@ -11,6 +11,7 @@ from app.agent.events import RunEvent, RunEventHub
 from app.agent.types import AssistantTurn
 from app.api.runs import run_events
 from app.db.run_repository import RunRepository
+from tests.agent.fakes import finish
 from tests.test_runs import _create_session, _wait_for_terminal
 
 
@@ -25,7 +26,7 @@ class BlockingModel:
         assert on_text_delta is not None
         on_text_delta("Hel")
         on_text_delta("lo")
-        return AssistantTurn("Hello")
+        return finish("Hello")
 
 
 def test_websocket_sends_assistant_lifecycle_then_terminal_event(
@@ -248,9 +249,7 @@ def test_terminal_run_websocket_returns_one_snapshot(app_factory, tmp_path: Path
             "Model",
             (),
             {
-                "complete": lambda self, messages, tools, on_text_delta=None: AssistantTurn(
-                    "Done."
-                )
+                "complete": lambda self, messages, tools, on_text_delta=None: finish("Done.")
             },
         )()
     ) as client:

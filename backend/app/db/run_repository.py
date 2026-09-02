@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime
+import json
 
 from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
@@ -305,7 +306,6 @@ class RunRepository:
                 RunRecord.status == "completed",
                 MessageRecord.session_id == session_id,
                 MessageRecord.role.in_(("user", "assistant")),
-                MessageRecord.tool_calls_json.is_(None),
                 MessageRecord.content.is_not(None),
             )
             .order_by(MessageRecord.created_at.desc(), MessageRecord.id.desc())
@@ -316,6 +316,18 @@ class RunRepository:
             content = message.content
             if content is None or not content.strip():
                 continue
+            if message.tool_calls_json is not None:
+                try:
+                    calls = json.loads(message.tool_calls_json)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                if not any(
+                    isinstance(call, dict)
+                    and isinstance(call.get("function"), dict)
+                    and call["function"].get("name") == "finish_task"
+                    for call in calls
+                ):
+                    continue
             if characters + len(content) > character_budget:
                 break
             selected.append(message)

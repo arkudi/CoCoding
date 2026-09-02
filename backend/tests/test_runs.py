@@ -12,7 +12,7 @@ from app.config import Settings
 from app.db.models import RunRecord
 from app.db.run_repository import RunRepository
 from app.main import create_app
-from tests.agent.fakes import ScriptedModelClient
+from tests.agent.fakes import ScriptedModelClient, finish
 
 
 def _create_session(client: TestClient, workspace: Path) -> dict[str, object]:
@@ -48,7 +48,7 @@ def test_submit_run_and_reload_complete_evidence(app_factory, tmp_path: Path) ->
                 None,
                 (ToolCall("w1", "write_file", '{"path":"a.txt","content":"new\\n"}'),),
             ),
-            AssistantTurn("Updated a.txt."),
+            finish("Updated a.txt.", changed_files=["a.txt"]),
         ]
     )
 
@@ -92,8 +92,8 @@ def test_second_run_replays_only_completed_user_and_terminal_assistant_messages(
                 None,
                 (ToolCall("read-1", "read_file", '{"path":"a.txt"}'),),
             ),
-            AssistantTurn("The first run inspected a.txt."),
-            AssistantTurn("The second run is complete."),
+            finish("The first run inspected a.txt."),
+            finish("The second run is complete."),
         ]
     )
 
@@ -198,7 +198,7 @@ def test_active_execution_lock_returns_stable_conflict_without_run_creation(app_
         def complete(self, messages, tools, on_text_delta=None):
             self.entered.set()
             assert self.release.wait(2)
-            return AssistantTurn("Finished.")
+            return finish("Finished.")
 
     model = BlockingModel()
     with app_factory(model) as client:
@@ -242,7 +242,7 @@ def test_history_load_failure_creates_no_run(app_factory, tmp_path: Path, monkey
 def test_injected_model_runs_without_production_key(app_factory, tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    model = ScriptedModelClient([AssistantTurn("Finished.")])
+    model = ScriptedModelClient([finish("Finished.")])
 
     with app_factory(model) as client:
         session = _create_session(client, workspace)
@@ -287,7 +287,7 @@ def test_message_persistence_failure_marks_created_run_failed_with_safe_error(
 
     monkeypatch.setattr(RunRepository, "add_message", fail_first_message)
 
-    with app_factory(ScriptedModelClient([AssistantTurn("Unused.")])) as client:
+    with app_factory(ScriptedModelClient([finish("Unused.")])) as client:
         session = _create_session(client, workspace)
         response = client.post(
             f"/api/sessions/{session['id']}/runs",
@@ -312,7 +312,7 @@ def test_file_change_generation_failure_still_marks_created_run_failed(
 
     monkeypatch.setattr(WorkspaceService, "changes", fail_changes)
 
-    with app_factory(ScriptedModelClient([AssistantTurn("Finished.")])) as client:
+    with app_factory(ScriptedModelClient([finish("Finished.")])) as client:
         session = _create_session(client, workspace)
         response = client.post(
             f"/api/sessions/{session['id']}/runs",
@@ -343,7 +343,7 @@ def test_post_loop_repository_failure_is_terminalized_by_service_boundary(
 
     monkeypatch.setattr(RunRepository, "get_run_detail", fail_first_detail_load)
 
-    with app_factory(ScriptedModelClient([AssistantTurn("Finished.")])) as client:
+    with app_factory(ScriptedModelClient([finish("Finished.")])) as client:
         session = _create_session(client, workspace)
         response = client.post(
             f"/api/sessions/{session['id']}/runs",
@@ -360,7 +360,7 @@ def test_post_loop_repository_failure_is_terminalized_by_service_boundary(
 def test_run_history_and_terminal_cancel_are_durable(app_factory, tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    with app_factory(ScriptedModelClient([AssistantTurn("Finished.")])) as client:
+    with app_factory(ScriptedModelClient([finish("Finished.")])) as client:
         session = _create_session(client, workspace)
         created = client.post(
             f"/api/sessions/{session['id']}/runs", json={"prompt": "inspect"}

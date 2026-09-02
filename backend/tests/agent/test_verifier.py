@@ -17,7 +17,7 @@ from app.db.database import create_schema
 from app.db.models import SessionRecord
 from app.db.run_repository import RunRepository
 
-from .fakes import ScriptedModelClient
+from .fakes import ScriptedModelClient, finish
 
 
 @dataclass
@@ -95,6 +95,25 @@ def test_loop_completes_from_verified_finish_task(run_context) -> None:
     assert [item.name for item in detail.tool_calls] == ["write_file", "finish_task"]
     assert detail.tool_calls[-1].status == "succeeded"
     assert any(tool["function"]["name"] == "finish_task" for tool in model.calls[0]["tools"])
+
+
+def test_plain_response_is_progress_and_must_be_followed_by_finish_task(run_context) -> None:
+    model = ScriptedModelClient([
+        AssistantTurn("I think the task is done."),
+        finish("Verified completion."),
+    ])
+
+    result = run_context.loop(model).run(
+        run_id=run_context.run.id,
+        session_id=run_context.session.id,
+        prompt="inspect",
+        prior_messages=[],
+        max_steps=5,
+    )
+
+    assert result.status == "completed"
+    assert result.final_response == "Verified completion."
+    assert "plain response cannot complete" in model.calls[1]["messages"][-1]["content"]
 
 
 def test_loop_returns_failed_completion_evidence_to_model(run_context) -> None:

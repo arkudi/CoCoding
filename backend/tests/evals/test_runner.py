@@ -4,7 +4,7 @@ import json
 
 from app.agent.types import AssistantTurn, ToolCall
 from app.evals.runner import EvalCase, EvalExpectations, EvalRunner, EvalSuite, load_suite
-from tests.agent.fakes import ScriptedModelClient
+from tests.agent.fakes import ScriptedModelClient, finish
 
 
 def test_eval_runner_checks_complete_agent_trajectory() -> None:
@@ -27,7 +27,7 @@ def test_eval_runner_checks_complete_agent_trajectory() -> None:
                     "path": "note.txt", "old_text": "before", "new_text": "after"
                 })),),
             ),
-            AssistantTurn("Updated note.txt."),
+            finish("Updated note.txt.", changed_files=["note.txt"]),
         ]
     )
 
@@ -35,7 +35,7 @@ def test_eval_runner_checks_complete_agent_trajectory() -> None:
 
     assert report.passed is True
     assert report.passed_cases == 1
-    assert report.cases[0].tool_calls == 1
+    assert report.cases[0].tool_calls == 2
     assert all(check.passed for check in report.cases[0].checks)
 
 
@@ -45,7 +45,7 @@ def test_eval_runner_reports_failed_expectations() -> None:
         prompt="answer",
         expect=EvalExpectations(final_response_contains=["wanted"]),
     )
-    report = EvalRunner(lambda _case: ScriptedModelClient([AssistantTurn("actual")])).run(
+    report = EvalRunner(lambda _case: ScriptedModelClient([finish("actual")])).run(
         EvalSuite(name="test-suite", cases=[case])
     )
 
