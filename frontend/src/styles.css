@@ -111,6 +111,12 @@ pre { margin: 0; font-family: "Cascadia Code", Consolas, monospace; font-size: 1
 .tabs { display: flex; gap: 19px; border-bottom: 1px solid var(--line); }
 .tab { padding: 0 0 11px; border: 0; color: var(--muted); background: transparent; cursor: pointer; }
 .tab.active { color: var(--pine); border-bottom: 2px solid var(--signal); }
+.workspace-path { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 9px; align-items: center; margin-top: 13px; padding: 9px 10px; border: 1px solid #cbd0c5; border-left: 3px solid var(--signal); border-radius: 3px; background: rgba(238, 241, 233, .66); }
+.workspace-path > span { position: relative; width: 15px; height: 10px; border: 1px solid #9b6b2d; border-radius: 1px; background: color-mix(in srgb, #b07d35 13%, transparent); }
+.workspace-path > span::before { content: ""; position: absolute; top: -4px; left: 1px; width: 7px; height: 3px; border: 1px solid #9b6b2d; border-bottom: 0; border-radius: 1px 1px 0 0; }
+.workspace-path div { min-width: 0; }
+.workspace-path small { display: block; margin-bottom: 2px; color: var(--muted); font-size: 9px; font-weight: 700; letter-spacing: .12em; }
+.workspace-path code { display: block; overflow: hidden; color: var(--ink); font-family: "Cascadia Code", Consolas, monospace; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-pane { padding-top: 16px; }
 .file-tree, .diff-list { display: grid; gap: 2px; max-height: 34vh; overflow: auto; }
 .file-tree button, .diff-list button { padding: 8px 9px; border: 0; text-align: left; background: transparent; font-family: "Cascadia Code", Consolas, monospace; font-size: 11px; }

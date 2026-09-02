@@ -5,6 +5,7 @@ import type { WorkspaceFile } from '@/api/workspace'
 import type { FileChange } from '@/types/run'
 
 const props = defineProps<{
+  workspacePath: string | null
   files: string[]
   selectedPath: string | null
   preview: WorkspaceFile | null
@@ -26,6 +27,13 @@ const diff = computed(() => props.fileChanges.find(item => item.relative_path ==
     <div class="tabs" role="tablist" aria-label="工作区视图">
       <button class="tab" :class="{ active: tab === 'files' }" role="tab" :aria-selected="tab === 'files'" @click="tab = 'files'">文件</button>
       <button class="tab" :class="{ active: tab === 'diff' }" role="tab" :aria-selected="tab === 'diff'" @click="tab = 'diff'">Diff</button>
+    </div>
+    <div v-if="workspacePath" class="workspace-path" :title="workspacePath">
+      <span aria-hidden="true" />
+      <div>
+        <small>当前路径</small>
+        <code>{{ workspacePath }}</code>
+      </div>
     </div>
     <section v-if="tab === 'files'" class="workspace-pane" role="tabpanel">
       <div class="file-sync-bar">
