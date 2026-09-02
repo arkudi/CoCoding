@@ -44,6 +44,9 @@ def create_app(
                     resolved.agent_require_resolved_test_failures
                 ),
             ),
+            multi_agent_enabled=resolved.agent_multi_agent_enabled,
+            max_delegations=resolved.agent_max_delegations,
+            child_step_limit=resolved.agent_child_step_limit,
         )
         db = application.state.session_factory()
         try:

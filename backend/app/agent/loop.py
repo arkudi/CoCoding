@@ -11,6 +11,7 @@ from typing import Callable, Literal
 from sqlalchemy import inspect
 
 from app.agent.events import RunEvent
+from app.agent.orchestration import SharedStepBudget, delegate_task_schema
 from app.agent.provider import ModelProviderError
 from app.agent.prompts import build_system_prompt
 from app.agent.tools import ToolRegistry
@@ -65,6 +66,11 @@ class AgentLoop:
         workspace: WorkspaceService | None = None,
         event_sink: Callable[[RunEvent], None] | None = None,
         verification_policy: VerificationPolicy | None = None,
+        allowed_tools: frozenset[str] | None = None,
+        delegator: Callable[[ToolCall], ToolResult] | None = None,
+        shared_budget: SharedStepBudget | None = None,
+        system_prompt: str | None = None,
+        execution_id: str | None = None,
     ) -> None:
         self._model = model
         self._registry = registry
@@ -72,6 +78,11 @@ class AgentLoop:
         self._workspace = workspace or registry._workspace
         self._event_sink = event_sink
         self._verification_policy = verification_policy or VerificationPolicy()
+        self._allowed_tools = allowed_tools
+        self._delegator = delegator
+        self._shared_budget = shared_budget
+        self._system_prompt = system_prompt
+        self._execution_id = execution_id
         self._current_step_count = 0
 
     def run(
@@ -112,7 +123,7 @@ class AgentLoop:
         messages = [
             {
                 "role": "system",
-                "content": build_system_prompt(self._workspace.root),
+                "content": self._system_prompt or build_system_prompt(self._workspace.root),
             },
             *self._bounded_prior_messages(prior_messages),
             {"role": "user", "content": prompt},
@@ -120,12 +131,22 @@ class AgentLoop:
         user_message = self._repository.add_message(run_id, session_id, "user", prompt)
         self._emit("message.created", run_id, self._record_data(user_message))
         step_count = 0
-        model_tools = [*self._registry.schemas(), finish_task_schema()]
+        model_tools = [*self._registry.schemas(self._allowed_tools), finish_task_schema()]
+        if self._delegator is not None:
+            model_tools.append(delegate_task_schema())
 
         for step_count in range(1, max_steps + 1):
-            self._current_step_count = step_count
             if token.is_cancelled:
-                return self._finish(run_id, step_count - 1, "cancelled", None, _CANCELLED_ERROR)
+                return self._finish(run_id, self._effective_step_count(step_count - 1), "cancelled", None, _CANCELLED_ERROR)
+            if self._shared_budget is not None and not self._shared_budget.consume():
+                return self._finish(
+                    run_id,
+                    self._shared_budget.used,
+                    "max_steps",
+                    None,
+                    _MAX_STEPS_ERROR,
+                )
+            self._current_step_count = self._effective_step_count(step_count)
             self._assert_no_database_transaction()
             try:
                 self._emit("assistant.started", run_id, {})
@@ -188,6 +209,9 @@ class AgentLoop:
                             0,
                         )
                         completion = verification.completion
+                elif call.name == "delegate_task" and self._delegator is not None:
+                    result = self._delegator(call)
+                    completion = None
                 else:
                     result = self._execute_tool(call)
                     completion = None
@@ -209,13 +233,19 @@ class AgentLoop:
                 if call.name == "finish_task" and result.ok and completion is not None:
                     return self._finish(
                         run_id,
-                        step_count,
+                        self._effective_step_count(step_count),
                         "completed",
                         completion.summary,
                         None,
                     )
 
-        return self._finish(run_id, step_count, "max_steps", None, _MAX_STEPS_ERROR)
+        return self._finish(
+            run_id,
+            self._effective_step_count(step_count),
+            "max_steps",
+            None,
+            _MAX_STEPS_ERROR,
+        )
 
     def _finish(
         self,
@@ -233,6 +263,7 @@ class AgentLoop:
             run_id,
             [self._record_data(change) for change in file_changes],
         )
+        self._finish_agent_execution(status, step_count, final_response, error_text)
         self._repository.finish_run(
             run_id,
             status,
@@ -299,7 +330,9 @@ class AgentLoop:
     def _execute_tool(self, call: ToolCall) -> ToolResult:
         self._assert_no_database_transaction()
         try:
-            return self._registry.execute(call)
+            if self._allowed_tools is None:
+                return self._registry.execute(call)
+            return self._registry.execute(call, self._allowed_tools)
         except Exception:
             return ToolResult(False, None, ToolError("TOOL_EXECUTION_ERROR", _TOOL_ERROR), 0)
 
@@ -324,6 +357,9 @@ class AgentLoop:
 
         failed_state_persisted = False
         try:
+            self._finish_agent_execution(
+                "failed", self._current_step_count, None, _INTERNAL_ERROR
+            )
             self._repository.finish_run(
                 run_id,
                 "failed",
@@ -367,6 +403,38 @@ class AgentLoop:
                 "Could not roll back failed run transaction (type=%s)",
                 type(rollback_error).__name__,
             )
+
+    def _effective_step_count(self, local_step_count: int) -> int:
+        if self._shared_budget is not None:
+            return self._shared_budget.used
+        return local_step_count
+
+    def _finish_agent_execution(
+        self,
+        run_status: str,
+        step_count: int,
+        final_response: str | None,
+        error_text: str | None,
+    ) -> None:
+        if self._execution_id is None:
+            return
+        execution_status = (
+            "completed"
+            if run_status == "completed"
+            else "cancelled"
+            if run_status == "cancelled"
+            else "failed"
+        )
+        record = self._repository.finish_agent_execution(
+            self._execution_id,
+            execution_status,
+            step_count=step_count,
+            final_result_json=json.dumps(
+                {"final_response": final_response, "error": error_text},
+                ensure_ascii=False,
+            ),
+        )
+        self._emit("agent.finished", record.run_id, self._record_data(record))
 
     def _assert_no_database_transaction(self) -> None:
         if self._repository.db.in_transaction():

@@ -47,11 +47,17 @@ class RunManager:
         event_hub: RunEventHub,
         hard_step_limit: int = 50,
         verification_policy: VerificationPolicy | None = None,
+        multi_agent_enabled: bool = False,
+        max_delegations: int = 3,
+        child_step_limit: int = 10,
     ) -> None:
         self._session_factory = session_factory
         self._hub = event_hub
         self._hard_step_limit = hard_step_limit
         self._verification_policy = verification_policy or VerificationPolicy()
+        self._multi_agent_enabled = multi_agent_enabled
+        self._max_delegations = max_delegations
+        self._child_step_limit = child_step_limit
         self._executor = ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="cocoding-agent"
         )
@@ -75,6 +81,9 @@ class RunManager:
                 self._session_factory,
                 model_client,
                 verification_policy=self._verification_policy,
+                multi_agent_enabled=self._multi_agent_enabled,
+                max_delegations=self._max_delegations,
+                child_step_limit=self._child_step_limit,
             )
             detail = service.create_run(session_id, prompt, self._hard_step_limit)
             token = CancellationToken()
@@ -147,6 +156,9 @@ class RunManager:
                 self._session_factory,
                 model_client,
                 verification_policy=self._verification_policy,
+                multi_agent_enabled=self._multi_agent_enabled,
+                max_delegations=self._max_delegations,
+                child_step_limit=self._child_step_limit,
             ).execute_existing(run_id, token, self._hub.publish)
             with self._session_factory() as db:
                 RunRepository(db).set_session_status(

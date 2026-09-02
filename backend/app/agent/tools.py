@@ -202,7 +202,7 @@ class ToolRegistry:
             "get_diff": self._get_diff,
         }
 
-    def schemas(self) -> list[dict[str, object]]:
+    def schemas(self, allowed_names: set[str] | frozenset[str] | None = None) -> list[dict[str, object]]:
         return [
             {
                 "type": "function",
@@ -213,11 +213,22 @@ class ToolRegistry:
                 },
             }
             for name, description, arguments in self._tool_definitions
+            if allowed_names is None or name in allowed_names
         ]
 
-    def execute(self, call: ToolCall) -> ToolResult:
+    def execute(
+        self,
+        call: ToolCall,
+        allowed_names: set[str] | frozenset[str] | None = None,
+    ) -> ToolResult:
         started = time.perf_counter()
         try:
+            if allowed_names is not None and call.name not in allowed_names:
+                return self._failure(
+                    "TOOL_NOT_ALLOWED",
+                    "This agent role is not allowed to use the requested tool.",
+                    started,
+                )
             arguments_type = self._tools.get(call.name)
             if arguments_type is None:
                 return self._failure("UNKNOWN_TOOL", "The requested tool is not available.", started)

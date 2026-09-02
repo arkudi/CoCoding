@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./data/cocoding.db"
     frontend_dist: Path = Path("frontend/dist")
     agent_hard_step_limit: int = Field(default=50, ge=1, le=500)
+    agent_multi_agent_enabled: bool = True
+    agent_max_delegations: int = Field(default=3, ge=1, le=10)
+    agent_child_step_limit: int = Field(default=10, ge=1, le=50)
     agent_require_code_verification: bool = True
     agent_allow_unverified_code_with_reason: bool = True
     agent_require_resolved_test_failures: bool = True
