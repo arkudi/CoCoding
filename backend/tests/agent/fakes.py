@@ -11,6 +11,8 @@ def finish(
     *,
     changed_files: list[str] | None = None,
     tests: list[dict[str, object]] | None = None,
+    verification_note: str | None = None,
+    acceptance_checks: list[dict[str, object]] | None = None,
     unresolved_issues: list[str] | None = None,
     call_id: str = "finish-task",
 ) -> AssistantTurn:
@@ -25,6 +27,8 @@ def finish(
                     "summary": summary,
                     "changed_files": changed_files or [],
                     "tests": tests or [],
+                    "verification_note": verification_note,
+                    "acceptance_checks": acceptance_checks or [],
                     "unresolved_issues": unresolved_issues or [],
                 }),
             ),

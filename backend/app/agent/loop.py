@@ -15,7 +15,7 @@ from app.agent.provider import ModelProviderError
 from app.agent.prompts import build_system_prompt
 from app.agent.tools import ToolRegistry
 from app.agent.types import AssistantTurn, ModelClient, ToolCall, ToolError, ToolResult
-from app.agent.verifier import CompletionVerifier, finish_task_schema
+from app.agent.verifier import CompletionVerifier, VerificationPolicy, finish_task_schema
 from app.agent.workspace import WorkspaceService
 from app.db.run_repository import RunRepository
 
@@ -64,12 +64,14 @@ class AgentLoop:
         repository: RunRepository,
         workspace: WorkspaceService | None = None,
         event_sink: Callable[[RunEvent], None] | None = None,
+        verification_policy: VerificationPolicy | None = None,
     ) -> None:
         self._model = model
         self._registry = registry
         self._repository = repository
         self._workspace = workspace or registry._workspace
         self._event_sink = event_sink
+        self._verification_policy = verification_policy or VerificationPolicy()
         self._current_step_count = 0
 
     def run(
@@ -170,7 +172,9 @@ class AgentLoop:
                         completion = None
                     else:
                         verification = CompletionVerifier(
-                            self._repository, self._workspace
+                            self._repository,
+                            self._workspace,
+                            self._verification_policy,
                         ).verify(run_id, call.arguments_json)
                         result = ToolResult(
                             verification.ok,

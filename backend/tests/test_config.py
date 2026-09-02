@@ -14,6 +14,9 @@ def test_deepseek_settings_use_documented_unprefixed_environment_names(
     assert settings.deepseek_base_url == "https://deepseek.test/v1"
     assert settings.deepseek_model == "deepseek-test"
     assert settings.agent_hard_step_limit == 50
+    assert settings.agent_require_code_verification is True
+    assert settings.agent_allow_unverified_code_with_reason is True
+    assert settings.agent_require_resolved_test_failures is True
 
 
 def test_agent_hard_step_limit_uses_prefixed_environment_name(monkeypatch) -> None:

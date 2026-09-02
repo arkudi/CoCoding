@@ -12,7 +12,7 @@ from sqlalchemy.orm import sessionmaker
 from app.agent.loop import AgentLoop
 from app.agent.tools import ToolRegistry
 from app.agent.types import AssistantTurn, ToolCall
-from app.agent.verifier import CompletionVerifier, finish_task_schema
+from app.agent.verifier import CompletionVerifier, VerificationPolicy, finish_task_schema
 from app.agent.workspace import WorkspaceService
 from app.db.database import create_schema
 from app.db.models import SessionRecord
@@ -153,13 +153,102 @@ def test_verifier_rejects_test_claim_without_command_evidence(run_context) -> No
     }))
 
     assert result.ok is False
-    assert "No successful run_command evidence" in result.errors[0]
+    assert "No successful run_tests evidence" in result.errors[0]
 
 
-def test_loop_accepts_test_claim_with_matching_command_evidence(run_context) -> None:
-    command = "python --version"
+def test_verifier_requires_evidence_or_reason_for_code_changes(run_context) -> None:
+    run_context.workspace.write_file("module.py", "value = 1\n")
+    verifier = CompletionVerifier(run_context.repository, run_context.workspace)
+
+    rejected = verifier.verify(run_context.run.id, json.dumps({
+        "summary": "Changed code.",
+        "changed_files": ["module.py"],
+    }))
+    accepted = verifier.verify(run_context.run.id, json.dumps({
+        "summary": "Changed code without runnable tests.",
+        "changed_files": ["module.py"],
+        "verification_note": "The isolated fixture has no test runner configured.",
+    }))
+
+    assert rejected.ok is False
+    assert "Code changed without test evidence" in rejected.errors[0]
+    assert accepted.ok is True
+
+
+def test_strict_policy_rejects_unverified_code_even_with_reason(run_context) -> None:
+    run_context.workspace.write_file("module.py", "value = 1\n")
+    verifier = CompletionVerifier(
+        run_context.repository,
+        run_context.workspace,
+        VerificationPolicy(allow_unverified_code_with_reason=False),
+    )
+
+    result = verifier.verify(run_context.run.id, json.dumps({
+        "summary": "Changed code.",
+        "changed_files": ["module.py"],
+        "verification_note": "No tests exist.",
+    }))
+
+    assert result.ok is False
+    assert "Policy requires successful test evidence" in result.errors[0]
+
+
+def test_verifier_requires_latest_test_failure_to_be_disclosed(run_context) -> None:
+    tool = run_context.repository.start_tool_call(
+        run_context.run.id, "test-1", "run_tests", '{"command":"pytest"}'
+    )
+    run_context.repository.finish_tool_call(
+        tool.id,
+        "succeeded",
+        json.dumps({
+            "ok": True,
+            "data": {"command": "pytest", "exit_code": 1},
+            "error": None,
+            "meta": {"duration_ms": 1, "truncated": False},
+        }),
+        1,
+    )
+    verifier = CompletionVerifier(run_context.repository, run_context.workspace)
+
+    rejected = verifier.verify(run_context.run.id, json.dumps({
+        "summary": "Tests failed.", "changed_files": [],
+    }))
+    accepted = verifier.verify(run_context.run.id, json.dumps({
+        "summary": "Tests failed.",
+        "changed_files": [],
+        "unresolved_issues": ["pytest is still failing"],
+    }))
+
+    assert rejected.ok is False
+    assert "Latest test runs failed" in rejected.errors[0]
+    assert accepted.ok is True
+
+
+def test_incomplete_acceptance_check_requires_unresolved_issue(run_context) -> None:
+    verifier = CompletionVerifier(run_context.repository, run_context.workspace)
+    payload = {
+        "summary": "Partially complete.",
+        "changed_files": [],
+        "acceptance_checks": [{
+            "criterion": "All tests pass",
+            "status": "not_run",
+            "evidence": "No test command is available",
+        }],
+    }
+
+    result = verifier.verify(run_context.run.id, json.dumps(payload))
+
+    assert result.ok is False
+    assert "Acceptance checks are incomplete" in result.errors[0]
+
+
+def test_loop_accepts_test_claim_with_matching_run_tests_evidence(run_context) -> None:
+    (run_context.workspace.root / "test_sample.py").write_text(
+        "def test_ok():\n    assert True\n", encoding="utf-8"
+    )
+    command = f'"{sys.executable}" -m pytest -q'
     model = ScriptedModelClient([
-        AssistantTurn(None, (call("run_command", {"command": command}, "c1"),)),
+        AssistantTurn(None, (call("run_tests", {"command": command}, "c1"),)),
         AssistantTurn(None, (call("finish_task", {
             "summary": "Verification completed.",
             "changed_files": [],

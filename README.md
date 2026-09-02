@@ -94,6 +94,14 @@ The Agent decides when work is complete by submitting `finish_task`; clients do 
 choose a turn count. The runtime retains a safety-only hard limit of 50 model turns to
 prevent an unbounded loop. Override it with `COCODING_AGENT_HARD_STEP_LIMIT` when needed.
 
+Completion verification is controlled by server-side policy. By default, code changes
+need successful test evidence or an explicit `verification_note`, the latest failed
+`run_tests` result must be disclosed as unresolved, and incomplete acceptance checks
+must be disclosed. Operators can tighten policy with
+`COCODING_AGENT_ALLOW_UNVERIFIED_CODE_WITH_REASON=false`; the related
+`COCODING_AGENT_REQUIRE_CODE_VERIFICATION` and
+`COCODING_AGENT_REQUIRE_RESOLVED_TEST_FAILURES` flags are also configurable.
+
 Security boundary: agent command execution is **not sandboxed**. Commands start with the session workspace as their current directory, but they retain the host user's filesystem and process access; file-tool path containment does not contain commands. Use this runtime only with trusted local workspaces and prompts. The runtime permits only one active agent run per process; keep production at `--workers 1`.
 
 ## Tests
