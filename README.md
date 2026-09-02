@@ -61,6 +61,12 @@ python -m uvicorn app.main:app --app-dir backend --workers 1
 
 After the build, FastAPI serves the frontend from `frontend/dist` at `http://127.0.0.1:8000`, including built assets. If no build is present, the root route returns an API hint instead.
 
+On Windows, **新建任务** opens the native directory picker through the local backend.
+No workspace path or task name needs to be typed. The new session receives a temporary
+directory-based label; when its first prompt starts, the Agent generates a concise title,
+persists it, and updates the sidebar in real time. If title generation fails, execution
+continues with the temporary label.
+
 ## Agent runtime and realtime Run API
 
 The application accepts a session-backed Run with `202 Accepted`, executes it in one background worker, and publishes committed state changes through WebSocket. The Vue interface follows those events, then reconciles final messages, tool calls, and file-change evidence from SQLite.

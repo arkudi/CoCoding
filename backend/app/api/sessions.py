@@ -5,9 +5,20 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.db.repositories import SessionRepository
-from app.schemas import SessionCreate, SessionRead
+from app.directory_picker import DirectoryPickerUnavailableError
+from app.schemas import DirectorySelectionRead, SessionCreate, SessionRead
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
+
+
+@router.post("/select-workspace", response_model=DirectorySelectionRead)
+def select_workspace(request: Request) -> DirectorySelectionRead:
+    try:
+        return DirectorySelectionRead(path=request.app.state.directory_picker())
+    except DirectoryPickerUnavailableError as error:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(error)
+        ) from error
 
 
 def get_db(request: Request) -> Iterator[Session]:
@@ -20,9 +31,8 @@ def create_session(payload: SessionCreate, db: Session = Depends(get_db)) -> Ses
     workspace = Path(payload.workspace_path).expanduser().resolve()
     if not workspace.is_dir():
         raise HTTPException(status_code=422, detail="Workspace directory does not exist")
-    record = SessionRepository(db).create(
-        title=payload.title, workspace_path=str(workspace)
-    )
+    initial_title = payload.title or f"新任务 · {workspace.name or 'workspace'}"
+    record = SessionRepository(db).create(title=initial_title, workspace_path=str(workspace))
     return SessionRead.model_validate(record)
 
 

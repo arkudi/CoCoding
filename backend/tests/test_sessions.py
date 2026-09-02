@@ -53,3 +53,41 @@ def test_create_session_rejects_whitespace_only_title(
     )
 
     assert response.status_code == 422
+
+
+def test_create_session_generates_temporary_title_from_workspace(
+    client, tmp_path: Path
+) -> None:
+    workspace = tmp_path / "calculator"
+    workspace.mkdir()
+
+    response = client.post(
+        "/api/sessions", json={"workspace_path": str(workspace)}
+    )
+
+    assert response.status_code == 201
+    assert response.json()["title"] == "新任务 · calculator"
+
+
+def test_select_workspace_uses_native_picker(app_factory, tmp_path: Path) -> None:
+    from tests.agent.fakes import ScriptedModelClient
+
+    with app_factory(
+        ScriptedModelClient([]), directory_picker=lambda: str(tmp_path)
+    ) as client:
+        response = client.post("/api/sessions/select-workspace")
+
+    assert response.status_code == 200
+    assert response.json() == {"path": str(tmp_path)}
+
+
+def test_select_workspace_returns_null_when_user_cancels(app_factory) -> None:
+    from tests.agent.fakes import ScriptedModelClient
+
+    with app_factory(
+        ScriptedModelClient([]), directory_picker=lambda: None
+    ) as client:
+        response = client.post("/api/sessions/select-workspace")
+
+    assert response.status_code == 200
+    assert response.json() == {"path": None}

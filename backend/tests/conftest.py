@@ -26,13 +26,19 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
 
 @pytest.fixture
 def app_factory(tmp_path: Path):
-    def factory(model_client):
+    def factory(model_client, *, directory_picker=None):
         settings = Settings(
             database_url=f"sqlite:///{tmp_path / 'runs.db'}",
             frontend_dist=tmp_path / "missing-dist",
             deepseek_api_key="",
             agent_multi_agent_enabled=False,
         )
-        return TestClient(create_app(settings, model_client=model_client))
+        return TestClient(
+            create_app(
+                settings,
+                model_client=model_client,
+                directory_picker=directory_picker,
+            )
+        )
 
     return factory

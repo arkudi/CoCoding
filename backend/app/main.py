@@ -17,10 +17,13 @@ from app.agent.verifier import VerificationPolicy
 from app.config import Settings, get_settings
 from app.db.database import build_engine, build_session_factory, create_schema
 from app.db.run_repository import RunRepository
+from app.directory_picker import NativeDirectoryPicker
 
 
 def create_app(
-    settings: Settings | None = None, model_client: ModelClient | None = None
+    settings: Settings | None = None,
+    model_client: ModelClient | None = None,
+    directory_picker=None,
 ) -> FastAPI:
     resolved = settings or get_settings()
 
@@ -65,6 +68,7 @@ def create_app(
     app = FastAPI(title=resolved.app_name, lifespan=lifespan)
     app.state.settings = resolved
     app.state.model_client = model_client
+    app.state.directory_picker = directory_picker or NativeDirectoryPicker().select
     app.state.production_model_client_factory = lambda: DeepSeekClient.from_settings(resolved)
     app.include_router(health_router, prefix="/api")
     app.include_router(sessions_router, prefix="/api")

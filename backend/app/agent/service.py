@@ -18,6 +18,7 @@ from app.agent.orchestration import (
     build_manager_prompt,
 )
 from app.agent.tools import ToolRegistry
+from app.agent.title import generate_task_title, needs_generated_title
 from app.agent.types import ModelClient
 from app.agent.workspace import WorkspaceService
 from app.agent.verifier import VerificationPolicy
@@ -127,6 +128,37 @@ class AgentService:
             workspace_path = Path(session.workspace_path).expanduser().resolve()
             if not workspace_path.is_dir():
                 raise WorkspaceUnavailableError()
+            if needs_generated_title(session.title):
+                db.rollback()
+                try:
+                    generated_title = generate_task_title(
+                        self.model_client, detail.prompt
+                    )
+                except Exception as error:
+                    logger.warning(
+                        "Task title generation failed (error_type=%s)",
+                        type(error).__name__,
+                    )
+                    db.rollback()
+                else:
+                    if generated_title:
+                        renamed = repository.set_session_title(
+                            session.id, generated_title
+                        )
+                        if event_sink is not None:
+                            try:
+                                event_sink(
+                                    RunEvent.create(
+                                        "session.renamed",
+                                        run_id,
+                                        {"id": renamed.id, "title": renamed.title},
+                                    )
+                                )
+                            except Exception as error:
+                                logger.warning(
+                                    "Session rename event delivery failed (error_type=%s)",
+                                    type(error).__name__,
+                                )
             prior_messages = repository.completed_history(session.id)
             workspace = WorkspaceService(workspace_path)
             step_count = 0

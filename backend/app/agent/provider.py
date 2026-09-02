@@ -65,13 +65,17 @@ class DeepSeekClient(ModelClient):
         delivered_text = False
         for attempt in range(len(_RETRY_DELAYS) + 1):
             try:
+                request: dict[str, object] = {
+                    "model": self._model,
+                    "messages": messages,
+                    "stream": True,
+                    "extra_body": {"thinking": {"type": "disabled"}},
+                }
+                if tools:
+                    request["tools"] = tools
+                    request["tool_choice"] = "auto"
                 stream = self._client.chat.completions.create(
-                    model=self._model,
-                    messages=messages,
-                    tools=tools,
-                    tool_choice="auto",
-                    stream=True,
-                    extra_body={"thinking": {"type": "disabled"}},
+                    **request,
                 )
                 parts: list[str] = []
                 tool_parts: dict[int, _ToolCallParts] = {}

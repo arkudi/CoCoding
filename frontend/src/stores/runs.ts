@@ -101,7 +101,12 @@ export const useRunsStore = defineStore('runs', {
       if (event.run_id !== this.selected_id) return
       const run = this.details[event.run_id]
       if (!run) return
-      if (event.type === 'assistant.started') {
+      if (event.type === 'session.renamed') {
+        const data = event.data as { id?: unknown, title?: unknown }
+        if (typeof data.id === 'string' && typeof data.title === 'string') {
+          useSessionsStore().rename(data.id, data.title)
+        }
+      } else if (event.type === 'assistant.started') {
         this.draft_by_run[event.run_id] = { text: '', active: true }
       } else if (event.type === 'assistant.delta') {
         const data = event.data as Partial<AssistantDeltaData> | null
@@ -159,6 +164,7 @@ export const useRunsStore = defineStore('runs', {
     replaceRun(run: Run, clearDraft = true) {
       if (clearDraft) delete this.draft_by_run[run.id]
       this.details[run.id] = run
+      useSessionsStore().rename(run.session_id, run.session_title)
       this.history_by_session[run.session_id] = upsert(
         this.history_by_session[run.session_id] ?? [], run,
       )

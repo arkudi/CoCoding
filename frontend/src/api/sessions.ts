@@ -5,6 +5,9 @@ export { ApiError } from './client'
 
 export const listSessions = () => request<Session[]>('/api/sessions')
 
+export const selectWorkspace = () =>
+  request<{ path: string | null }>('/api/sessions/select-workspace', { method: 'POST' })
+
 export const createSession = (payload: SessionCreate) =>
   request<Session>('/api/sessions', {
     method: 'POST',

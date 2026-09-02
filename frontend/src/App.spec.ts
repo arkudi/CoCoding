@@ -21,6 +21,9 @@ test('creates a session and shows it in history', async () => {
   const fetchMock = vi.fn()
     .mockResolvedValueOnce(new Response(JSON.stringify([]), { status: 200 }))
     .mockResolvedValueOnce(new Response(JSON.stringify({
+      path: 'F:/demo/calculator',
+    }), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({
       id: '3d66a599-d202-4c8f-b3c3-7dc45888d277',
       title: 'Fix calculator',
       workspace_path: 'F:/demo/calculator',
@@ -34,16 +37,15 @@ test('creates a session and shows it in history', async () => {
 
   render(App, { global: { plugins: [createPinia()] } })
   await user.click(screen.getByRole('button', { name: '新建任务' }))
-  await user.type(screen.getByLabelText('任务名称'), 'Fix calculator')
-  await user.type(screen.getByLabelText('工作区路径'), 'F:/demo/calculator')
-  await user.click(screen.getByRole('button', { name: '创建' }))
 
   expect(await screen.findByRole('button', { name: 'Fix calculator' })).toBeTruthy()
-  expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/sessions', {
+  expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/sessions/select-workspace', {
+    method: 'POST',
+  })
+  expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/sessions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      title: 'Fix calculator',
       workspace_path: 'F:/demo/calculator',
     }),
   })
