@@ -12,7 +12,7 @@ class DirectoryPickerUnavailableError(RuntimeError):
 
 
 class NativeDirectoryPicker:
-    def select(self) -> str | None:
+    def select(self, initial_path: str | Path | None = None) -> str | None:
         if os.name != "nt":
             raise DirectoryPickerUnavailableError(
                 "Native directory selection is available only on Windows."
@@ -23,10 +23,21 @@ Add-Type -AssemblyName System.Windows.Forms
 $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
 $dialog.Description = '选择任务工作区'
 $dialog.ShowNewFolderButton = $false
+if ($env:COCODING_PICKER_INITIAL_DIRECTORY -and (Test-Path -LiteralPath $env:COCODING_PICKER_INITIAL_DIRECTORY -PathType Container)) {
+    $dialog.SelectedPath = $env:COCODING_PICKER_INITIAL_DIRECTORY
+}
 if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
     [Console]::Write($dialog.SelectedPath)
 }
 """
+        environment = os.environ.copy()
+        if initial_path is not None:
+            try:
+                resolved_initial = Path(initial_path).expanduser().resolve()
+                if resolved_initial.is_dir():
+                    environment["COCODING_PICKER_INITIAL_DIRECTORY"] = str(resolved_initial)
+            except (OSError, RuntimeError):
+                pass
         try:
             completed = subprocess.run(
                 ["powershell.exe", "-NoProfile", "-STA", "-Command", script],
@@ -37,6 +48,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
                 timeout=300,
                 check=False,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                env=environment,
             )
         except (OSError, subprocess.TimeoutExpired) as error:
             raise DirectoryPickerUnavailableError(
