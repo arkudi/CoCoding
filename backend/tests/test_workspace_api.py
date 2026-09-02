@@ -61,3 +61,19 @@ def test_workspace_api_returns_safe_binary_and_unavailable_errors(
     assert binary.json()["detail"]["code"] == "INVALID_UTF8"
     assert unavailable.status_code == 409
     assert unavailable.json()["detail"]["code"] == "WORKSPACE_UNAVAILABLE"
+
+
+def test_workspace_browser_lists_more_than_agent_tool_default_limit(
+    client: TestClient, tmp_path: Path
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    for index in range(501):
+        (workspace / f"file-{index:03}.txt").write_text("x", encoding="utf-8")
+    session = _create_session(client, workspace)
+
+    response = client.get(f"/api/sessions/{session['id']}/files")
+
+    assert response.status_code == 200
+    assert len(response.json()["files"]) == 501
+    assert response.json()["truncated"] is False

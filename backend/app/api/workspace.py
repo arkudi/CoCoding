@@ -12,6 +12,7 @@ from app.schemas import WorkspaceFileRead, WorkspaceFilesRead
 
 
 router = APIRouter(tags=["workspace"])
+_BROWSER_MAX_ENTRIES = 20_000
 
 
 def get_db(request: Request) -> Iterator[Session]:
@@ -55,7 +56,9 @@ def list_workspace_files(
     session_id: str, db: Session = Depends(get_db)
 ) -> WorkspaceFilesRead:
     try:
-        return WorkspaceFilesRead.model_validate(_workspace(db, session_id).list_files("."))
+        workspace = _workspace(db, session_id)
+        workspace.max_entries = _BROWSER_MAX_ENTRIES
+        return WorkspaceFilesRead.model_validate(workspace.list_files("."))
     except WorkspaceError as error:
         raise _workspace_error(error) from error
 
