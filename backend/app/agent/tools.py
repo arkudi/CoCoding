@@ -16,7 +16,7 @@ from typing import Callable, TextIO
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from app.agent.types import ToolCall, ToolError, ToolResult
-from app.agent.workspace import WorkspaceError, WorkspaceService
+from app.agent.workspace import WorkspaceError, WorkspacePatch, WorkspaceService
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +51,24 @@ class ReplaceInFileArgs(StrictArgs):
     new_text: str
 
 
+class SearchTextArgs(StrictArgs):
+    query: str = Field(min_length=1)
+    path: str = "."
+    regex: bool = False
+    case_sensitive: bool = False
+    max_results: int = Field(default=100, ge=1, le=500)
+
+
+class PatchEditArgs(StrictArgs):
+    path: str
+    old_text: str | None
+    new_text: str
+
+
+class ApplyPatchArgs(StrictArgs):
+    patches: list[PatchEditArgs] = Field(min_length=1, max_length=50)
+
+
 class RunCommandArgs(StrictArgs):
     command: str = Field(min_length=1)
     timeout: int = Field(default=30, ge=1, le=120)
@@ -62,6 +80,27 @@ class RunCommandArgs(StrictArgs):
         if not normalized:
             raise ValueError("command must not be blank")
         return normalized
+
+
+class RunTestsArgs(StrictArgs):
+    command: str = Field(min_length=1)
+    timeout: int = Field(default=120, ge=1, le=300)
+
+    @field_validator("command")
+    @classmethod
+    def normalize_command(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("command must not be blank")
+        return normalized
+
+
+class GitStatusArgs(StrictArgs):
+    pass
+
+
+class GitDiffArgs(StrictArgs):
+    staged: bool = False
 
 
 class GetDiffArgs(StrictArgs):
@@ -76,6 +115,10 @@ class _CommandTimeout(Exception):
 
 
 class _DestructiveCommand(Exception):
+    pass
+
+
+class _UnsupportedTestCommand(Exception):
     pass
 
 
@@ -131,9 +174,14 @@ class ToolRegistry:
     _tool_definitions: tuple[tuple[str, str, type[StrictArgs]], ...] = (
         ("list_files", "List non-ignored files in the workspace.", ListFilesArgs),
         ("read_file", "Read a UTF-8 text file from the workspace.", ReadFileArgs),
+        ("search_text", "Search workspace text and return matching lines.", SearchTextArgs),
         ("write_file", "Write UTF-8 text to a workspace file.", WriteFileArgs),
         ("replace_in_file", "Replace exactly one occurrence in a workspace file.", ReplaceInFileArgs),
+        ("apply_patch", "Apply one or more exact text edits after validating the entire patch.", ApplyPatchArgs),
         ("run_command", "Run a bounded local command in the workspace.", RunCommandArgs),
+        ("run_tests", "Run a recognized test command and return a structured summary.", RunTestsArgs),
+        ("git_status", "Get concise Git working-tree status.", GitStatusArgs),
+        ("git_diff", "Get the staged or unstaged Git diff.", GitDiffArgs),
         ("get_diff", "Get the workspace changes made during this run.", GetDiffArgs),
     )
 
@@ -143,9 +191,14 @@ class ToolRegistry:
         self._handlers: dict[str, Callable[[StrictArgs], tuple[object, bool]]] = {
             "list_files": self._list_files,
             "read_file": self._read_file,
+            "search_text": self._search_text,
             "write_file": self._write_file,
             "replace_in_file": self._replace_in_file,
+            "apply_patch": self._apply_patch,
             "run_command": self._run_command,
+            "run_tests": self._run_tests,
+            "git_status": self._git_status,
+            "git_diff": self._git_diff,
             "get_diff": self._get_diff,
         }
 
@@ -188,6 +241,8 @@ class ToolRegistry:
             return self._failure(error.code, error.message, started)
         except _DestructiveCommand as error:
             return self._failure("DESTRUCTIVE_COMMAND", str(error), started)
+        except _UnsupportedTestCommand as error:
+            return self._failure("UNSUPPORTED_TEST_COMMAND", str(error), started)
         except Exception:
             logger.exception("Agent tool execution failed (tool=%s)", call.name)
             return self._failure("TOOL_EXECUTION_ERROR", "The tool could not be executed.", started)
@@ -208,6 +263,17 @@ class ToolRegistry:
         assert isinstance(arguments, ReadFileArgs)
         return self._workspace.read_file(arguments.path, arguments.start_line, arguments.end_line), False
 
+    def _search_text(self, arguments: StrictArgs) -> tuple[object, bool]:
+        assert isinstance(arguments, SearchTextArgs)
+        data = self._workspace.search_text(
+            arguments.query,
+            arguments.path,
+            regex=arguments.regex,
+            case_sensitive=arguments.case_sensitive,
+            max_results=arguments.max_results,
+        )
+        return data, bool(data["truncated"])
+
     def _write_file(self, arguments: StrictArgs) -> tuple[object, bool]:
         assert isinstance(arguments, WriteFileArgs)
         return self._workspace.write_file(arguments.path, arguments.content), False
@@ -216,16 +282,51 @@ class ToolRegistry:
         assert isinstance(arguments, ReplaceInFileArgs)
         return self._workspace.replace_in_file(arguments.path, arguments.old_text, arguments.new_text), False
 
+    def _apply_patch(self, arguments: StrictArgs) -> tuple[object, bool]:
+        assert isinstance(arguments, ApplyPatchArgs)
+        patches = tuple(
+            WorkspacePatch(item.path, item.old_text, item.new_text)
+            for item in arguments.patches
+        )
+        return self._workspace.apply_patch(patches), False
+
     def _get_diff(self, arguments: StrictArgs) -> tuple[object, bool]:
         assert isinstance(arguments, GetDiffArgs)
         return {"diff": self._workspace.get_diff()}, False
 
     def _run_command(self, arguments: StrictArgs) -> tuple[object, bool]:
         assert isinstance(arguments, RunCommandArgs)
-        if self._is_explicit_destructive_command(arguments.command):
+        return self._execute_command(arguments.command, arguments.timeout)
+
+    def _run_tests(self, arguments: StrictArgs) -> tuple[object, bool]:
+        assert isinstance(arguments, RunTestsArgs)
+        if not self._is_supported_test_command(arguments.command):
+            raise _UnsupportedTestCommand(
+                "run_tests accepts a single recognized test-runner command without shell operators."
+            )
+        data, truncated = self._execute_command(arguments.command, arguments.timeout)
+        assert isinstance(data, dict)
+        combined = f"{data['stdout']}\n{data['stderr']}"
+        data["test_summary"] = self._test_summary(combined)
+        data["command"] = arguments.command
+        return data, truncated
+
+    def _git_status(self, arguments: StrictArgs) -> tuple[object, bool]:
+        assert isinstance(arguments, GitStatusArgs)
+        data, truncated = self._execute_command("git status --short", 30)
+        return data, truncated
+
+    def _git_diff(self, arguments: StrictArgs) -> tuple[object, bool]:
+        assert isinstance(arguments, GitDiffArgs)
+        command = "git diff --cached --no-ext-diff --" if arguments.staged else "git diff --no-ext-diff --"
+        data, truncated = self._execute_command(command, 30)
+        return data, truncated
+
+    def _execute_command(self, command: str, timeout: int) -> tuple[object, bool]:
+        if self._is_explicit_destructive_command(command):
             raise _DestructiveCommand("The command is explicitly destructive and cannot be run.")
         process = subprocess.Popen(
-            arguments.command,
+            command,
             cwd=self._workspace.root,
             shell=True,
             stdout=subprocess.PIPE,
@@ -255,7 +356,7 @@ class ToolRegistry:
 
         timed_out = False
         try:
-            process.wait(timeout=arguments.timeout)
+            process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             timed_out = True
             cleanup_deadline = time.monotonic() + _PROCESS_CLEANUP_TIMEOUT_SECONDS
@@ -278,6 +379,40 @@ class ToolRegistry:
         if timed_out:
             raise _CommandTimeout(data, truncated)
         return data, truncated
+
+    @staticmethod
+    def _is_supported_test_command(command: str) -> bool:
+        tokens = ToolRegistry._tokenize_command(command)
+        if not tokens or any(token in _COMMAND_OPERATORS for token in tokens):
+            return False
+        folded = [token.casefold() for token in tokens]
+        executable = re.split(r"[\\/]", folded[0])[-1]
+        if executable in {"pytest", "pytest.exe"}:
+            return True
+        if executable in {"python", "python.exe", "python3", "python3.exe", "py", "py.exe"}:
+            return len(folded) >= 3 and folded[1:3] == ["-m", "pytest"]
+        if executable in {"npm", "npm.cmd", "pnpm", "pnpm.cmd", "yarn", "yarn.cmd", "bun", "bun.exe"}:
+            return len(folded) >= 2 and (
+                folded[1] == "test"
+                or (folded[1] == "run" and len(folded) >= 3 and folded[2].startswith("test"))
+            )
+        return len(folded) >= 2 and (executable, folded[1]) in {
+            ("cargo", "test"),
+            ("cargo.exe", "test"),
+            ("go", "test"),
+            ("go.exe", "test"),
+            ("dotnet", "test"),
+            ("dotnet.exe", "test"),
+        }
+
+    @staticmethod
+    def _test_summary(output: str) -> dict[str, int]:
+        summary: dict[str, int] = {}
+        for label in ("passed", "failed", "skipped", "errors"):
+            matches = re.findall(rf"(\d+)\s+{label}\b", output, flags=re.IGNORECASE)
+            if matches:
+                summary[label] = max(int(value) for value in matches)
+        return summary
 
     @staticmethod
     def _join_readers(

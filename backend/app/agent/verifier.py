@@ -84,7 +84,7 @@ class CompletionVerifier:
         else:
             successful_commands: set[tuple[str, int]] = set()
             for call in detail.tool_calls:
-                if call.name != "run_command" or call.status != "succeeded":
+                if call.name not in {"run_command", "run_tests"} or call.status != "succeeded":
                     continue
                 try:
                     arguments = json.loads(call.arguments_json)

@@ -3,6 +3,7 @@
 import os
 import difflib
 import hashlib
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -42,6 +43,13 @@ class FileChangeEvidence:
     before_hash: str | None
     after_hash: str
     unified_diff: str
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspacePatch:
+    path: str
+    old_text: str | None
+    new_text: str
 
 
 class WorkspaceService:
@@ -182,6 +190,78 @@ class WorkspaceService:
         if matches != 1:
             raise WorkspaceError("REPLACE_MULTIPLE_MATCHES", "old text occurs multiple times")
         return self.write_file(path, content.replace(old_text, new_text, 1))
+
+    def apply_patch(self, patches: tuple[WorkspacePatch, ...]) -> dict[str, object]:
+        """Validate every exact edit before applying any of them."""
+        if not patches:
+            raise WorkspaceError("INVALID_PATCH", "at least one patch is required")
+        if len({patch.path for patch in patches}) != len(patches):
+            raise WorkspaceError("INVALID_PATCH", "each path may appear only once")
+
+        prepared: list[tuple[str, str]] = []
+        for patch in patches:
+            file_path = self.resolve(patch.path)
+            if patch.old_text is None:
+                if file_path.exists():
+                    raise WorkspaceError("PATCH_TARGET_EXISTS", "new-file patch target already exists")
+                updated = patch.new_text
+            else:
+                if not file_path.exists():
+                    raise WorkspaceError("PATH_NOT_FOUND", "patch target does not exist")
+                if not file_path.is_file():
+                    raise WorkspaceError("PATH_NOT_FILE", "patch target is not a regular file")
+                _, content = self._read_bounded_text(file_path)
+                matches = content.count(patch.old_text)
+                if matches == 0:
+                    raise WorkspaceError("PATCH_NO_MATCH", "patch old_text was not found")
+                if matches != 1:
+                    raise WorkspaceError("PATCH_MULTIPLE_MATCHES", "patch old_text is not unique")
+                updated = content.replace(patch.old_text, patch.new_text, 1)
+            if len(updated.encode("utf-8", errors="strict")) > self.max_text_bytes:
+                raise WorkspaceError("FILE_TOO_LARGE", "patched content exceeds text byte limit")
+            prepared.append((patch.path, updated))
+
+        for path, updated in prepared:
+            self.write_file(path, updated)
+        return {"paths": [Path(path).as_posix() for path, _ in prepared]}
+
+    def search_text(
+        self,
+        query: str,
+        path: str = ".",
+        *,
+        regex: bool = False,
+        case_sensitive: bool = False,
+        max_results: int = 100,
+    ) -> dict[str, object]:
+        flags = 0 if case_sensitive else re.IGNORECASE
+        try:
+            pattern = re.compile(query if regex else re.escape(query), flags)
+        except re.error as exc:
+            raise WorkspaceError("INVALID_SEARCH_PATTERN", "search regex is invalid") from exc
+
+        matches: list[dict[str, object]] = []
+        listing = self.list_files(path)
+        truncated = bool(listing["truncated"])
+        for relative in listing["files"]:
+            file_path = self.root / str(relative)
+            try:
+                _, content = self._read_bounded_text(file_path)
+            except WorkspaceError as exc:
+                if exc.code in {"INVALID_UTF8", "FILE_TOO_LARGE", "READ_FAILED"}:
+                    continue
+                raise
+            for line_number, line in enumerate(content.splitlines(), start=1):
+                if pattern.search(line) is None:
+                    continue
+                matches.append({
+                    "path": str(relative),
+                    "line": line_number,
+                    "text": line[:500],
+                })
+                if len(matches) >= max_results:
+                    return {"matches": matches, "truncated": True}
+        return {"matches": matches, "truncated": truncated}
 
     def changes(self) -> tuple[FileChangeEvidence, ...]:
         result: list[FileChangeEvidence] = []
