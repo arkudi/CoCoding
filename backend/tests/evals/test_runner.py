@@ -7,6 +7,10 @@ from app.evals.runner import EvalCase, EvalExpectations, EvalRunner, EvalSuite, 
 from tests.agent.fakes import ScriptedModelClient, finish
 
 
+def tool_turn(name: str, arguments: dict[str, object], call_id: str) -> AssistantTurn:
+    return AssistantTurn(None, (ToolCall(call_id, name, json.dumps(arguments)),))
+
+
 def test_eval_runner_checks_complete_agent_trajectory() -> None:
     case = EvalCase(
         id="edit",
@@ -36,6 +40,8 @@ def test_eval_runner_checks_complete_agent_trajectory() -> None:
     assert report.passed is True
     assert report.passed_cases == 1
     assert report.cases[0].tool_calls == 2
+    assert report.cases[0].orchestration == "single"
+    assert report.modes[0].orchestration == "single"
     assert all(check.passed for check in report.cases[0].checks)
 
 
@@ -67,3 +73,58 @@ def test_load_suite_rejects_unknown_fields(tmp_path) -> None:
         pass
     else:
         raise AssertionError("invalid suite should be rejected")
+
+
+def test_eval_runner_reports_multi_agent_roles_and_mode_metrics() -> None:
+    case = EvalCase(
+        id="multi-edit",
+        prompt="create a note",
+        orchestration="multi",
+        expect=EvalExpectations(
+            files_equal={"note.txt": "done"},
+            required_agent_roles=["manager", "implementer"],
+            max_steps=4,
+        ),
+    )
+    model = ScriptedModelClient(
+        [
+            tool_turn(
+                "delegate_task",
+                {
+                    "role": "implementer",
+                    "task": "Create note.txt",
+                    "expected_output": "The changed file.",
+                },
+                "delegate",
+            ),
+            tool_turn(
+                "write_file", {"path": "note.txt", "content": "done"}, "write"
+            ),
+            tool_turn(
+                "finish_subtask",
+                {
+                    "summary": "Created the note.",
+                    "relevant_files": ["note.txt"],
+                    "findings": [],
+                    "changed_files": ["note.txt"],
+                    "tests": [],
+                    "unresolved_issues": [],
+                },
+                "worker-finish",
+            ),
+            finish("Created note.txt.", changed_files=["note.txt"]),
+        ]
+    )
+
+    report = EvalRunner(lambda _case: model).run(
+        EvalSuite(name="multi-suite", cases=[case])
+    )
+
+    assert report.passed is True
+    assert report.cases[0].agent_executions == 2
+    assert report.cases[0].step_count == 4
+    assert report.modes == (
+        report.modes[0],
+    )
+    assert report.modes[0].orchestration == "multi"
+    assert report.modes[0].average_steps == 4

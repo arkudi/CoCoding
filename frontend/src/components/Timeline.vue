@@ -2,6 +2,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import RunComposer from './RunComposer.vue'
 import ToolChain from './ToolChain.vue'
+import AgentTeam from './AgentTeam.vue'
 import type { Run, RunCreate } from '@/types/run'
 
 const props = defineProps<{
@@ -31,7 +32,7 @@ const chronologicalHistory = computed(() => [...props.history].sort((left, right
 const conversationElement = ref<HTMLElement | null>(null)
 const followsLatest = ref(true)
 const conversationRevision = computed(() => props.history
-  .map(run => `${run.id}:${run.tool_calls.length}:${run.final_response?.length ?? -1}:${run.error_text ?? ''}`)
+  .map(run => `${run.id}:${run.tool_calls.length}:${run.agent_executions.length}:${run.final_response?.length ?? -1}:${run.error_text ?? ''}`)
   .join('|'))
 
 watch([conversationRevision, () => props.draft], async () => {
@@ -86,6 +87,7 @@ function isStreaming(run: Run) {
       >
         <section v-for="run in chronologicalHistory" :key="run.id" class="conversation-turn">
           <article class="message user-message"><span>你</span><p>{{ run.prompt }}</p></article>
+          <AgentTeam :executions="run.agent_executions" />
           <ToolChain v-if="run.tool_calls.length" :calls="run.tool_calls" />
           <article
             v-if="run.final_response !== null || responseFor(run)"

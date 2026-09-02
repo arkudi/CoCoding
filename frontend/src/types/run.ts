@@ -41,6 +41,19 @@ export interface FileChange {
   created_at: string
 }
 
+export interface AgentExecution {
+  id: string
+  run_id: string
+  parent_execution_id: string | null
+  role: 'manager' | 'explorer' | 'implementer' | 'reviewer'
+  task: string
+  status: 'running' | 'completed' | 'failed' | 'cancelled'
+  step_count: number
+  final_result_json: string | null
+  started_at: string
+  finished_at: string | null
+}
+
 export interface Run {
   id: string
   session_id: string
@@ -58,6 +71,7 @@ export interface Run {
   messages: RunMessage[]
   tool_calls: ToolCall[]
   file_changes: FileChange[]
+  agent_executions: AgentExecution[]
 }
 
 export interface RunCreate {
@@ -76,6 +90,8 @@ export type RunEventType =
   | 'assistant.started'
   | 'assistant.delta'
   | 'assistant.finished'
+  | 'agent.started'
+  | 'agent.finished'
   | 'message.created'
   | 'tool.started'
   | 'tool.finished'

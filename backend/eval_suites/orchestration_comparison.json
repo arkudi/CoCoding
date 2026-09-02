@@ -1,0 +1,30 @@
+{
+  "name": "single-vs-multi-agent-v1",
+  "cases": [
+    {
+      "id": "targeted-edit-single",
+      "orchestration": "single",
+      "prompt": "Change greeting.txt from hello to hello world, verify it, and summarize the result.",
+      "files": {"greeting.txt": "hello\n"},
+      "expect": {
+        "status": "completed",
+        "files_equal": {"greeting.txt": "hello world\n"},
+        "max_tool_failures": 0,
+        "max_steps": 10
+      }
+    },
+    {
+      "id": "targeted-edit-multi",
+      "orchestration": "multi",
+      "prompt": "Change greeting.txt from hello to hello world, verify it, and summarize the result.",
+      "files": {"greeting.txt": "hello\n"},
+      "expect": {
+        "status": "completed",
+        "files_equal": {"greeting.txt": "hello world\n"},
+        "required_agent_roles": ["manager", "implementer"],
+        "max_tool_failures": 0,
+        "max_steps": 14
+      }
+    }
+  ]
+}

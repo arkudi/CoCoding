@@ -6,7 +6,7 @@ const run = {
   prompt_version: 'v1', status: 'running', max_steps: 20, step_count: 0,
   final_response: null, error_text: null, created_at: '2026-09-01T00:00:00Z',
   updated_at: '2026-09-01T00:00:00Z', finished_at: null,
-  messages: [], tool_calls: [], file_changes: [],
+  messages: [], tool_calls: [], file_changes: [], agent_executions: [],
 }
 
 test('creates and lists runs with encoded identifiers', async () => {

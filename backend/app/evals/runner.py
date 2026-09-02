@@ -8,6 +8,7 @@ import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -28,6 +29,7 @@ class EvalExpectations(BaseModel):
     final_response_contains: list[str] = Field(default_factory=list)
     max_tool_failures: int = Field(default=0, ge=0)
     max_steps: int | None = Field(default=None, ge=1)
+    required_agent_roles: list[str] = Field(default_factory=list)
 
 
 class EvalCase(BaseModel):
@@ -36,6 +38,7 @@ class EvalCase(BaseModel):
     id: str = Field(min_length=1)
     prompt: str = Field(min_length=1)
     max_steps: int = Field(default=20, ge=1, le=50)
+    orchestration: Literal["single", "multi"] = "single"
     files: dict[str, str] = Field(default_factory=dict)
     expect: EvalExpectations = Field(default_factory=EvalExpectations)
 
@@ -57,13 +60,24 @@ class EvalCheck:
 @dataclass(frozen=True, slots=True)
 class EvalCaseResult:
     case_id: str
+    orchestration: str
     passed: bool
     duration_ms: int
     status: str
     step_count: int
     tool_calls: int
     tool_failures: int
+    agent_executions: int
     checks: tuple[EvalCheck, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class EvalModeSummary:
+    orchestration: str
+    passed_cases: int
+    total_cases: int
+    average_steps: float
+    average_tool_failures: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +88,7 @@ class EvalReport:
     total_cases: int
     duration_ms: int
     cases: tuple[EvalCaseResult, ...]
+    modes: tuple[EvalModeSummary, ...]
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -100,6 +115,7 @@ class EvalRunner:
             total_cases=len(results),
             duration_ms=self._duration_ms(started),
             cases=results,
+            modes=self._mode_summaries(results),
         )
 
     def _run_case(self, case: EvalCase) -> EvalCaseResult:
@@ -119,19 +135,25 @@ class EvalRunner:
                     db.commit()
                     db.refresh(session)
                     session_id = session.id
-                service = AgentService(session_factory, self._model_factory(case))
+                service = AgentService(
+                    session_factory,
+                    self._model_factory(case),
+                    multi_agent_enabled=case.orchestration == "multi",
+                )
                 created = service.create_run(session_id, case.prompt, case.max_steps)
                 detail = service.execute_existing(created.id, CancellationToken())
                 checks = self._checks(case, detail, workspace)
                 failures = sum(call.status == "failed" for call in detail.tool_calls)
                 return EvalCaseResult(
                     case_id=case.id,
+                    orchestration=case.orchestration,
                     passed=all(check.passed for check in checks),
                     duration_ms=self._duration_ms(started),
                     status=detail.status,
                     step_count=detail.step_count,
                     tool_calls=len(detail.tool_calls),
                     tool_failures=failures,
+                    agent_executions=len(detail.agent_executions),
                     checks=tuple(checks),
                 )
             finally:
@@ -173,6 +195,13 @@ class EvalRunner:
             failures <= expected.max_tool_failures,
             f"expected <= {expected.max_tool_failures}, got {failures}",
         )
+        agent_roles = [execution.role for execution in getattr(detail, "agent_executions")]
+        for role in expected.required_agent_roles:
+            add(
+                f"agent_role:{role}",
+                role in agent_roles,
+                f"observed agent roles: {agent_roles}",
+            )
         final_response = getattr(detail, "final_response") or ""
         for text in expected.final_response_contains:
             add(
@@ -198,3 +227,25 @@ class EvalRunner:
     @staticmethod
     def _duration_ms(started: float) -> int:
         return int((time.perf_counter() - started) * 1_000)
+
+    @staticmethod
+    def _mode_summaries(
+        results: tuple[EvalCaseResult, ...],
+    ) -> tuple[EvalModeSummary, ...]:
+        summaries: list[EvalModeSummary] = []
+        for mode in ("single", "multi"):
+            selected = [result for result in results if result.orchestration == mode]
+            if not selected:
+                continue
+            summaries.append(
+                EvalModeSummary(
+                    orchestration=mode,
+                    passed_cases=sum(result.passed for result in selected),
+                    total_cases=len(selected),
+                    average_steps=sum(result.step_count for result in selected) / len(selected),
+                    average_tool_failures=(
+                        sum(result.tool_failures for result in selected) / len(selected)
+                    ),
+                )
+            )
+        return tuple(summaries)
