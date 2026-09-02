@@ -112,10 +112,23 @@ pre { margin: 0; font-family: "Cascadia Code", Consolas, monospace; font-size: 1
 .tab { padding: 0 0 11px; border: 0; color: var(--muted); background: transparent; cursor: pointer; }
 .tab.active { color: var(--pine); border-bottom: 2px solid var(--signal); }
 .workspace-pane { padding-top: 16px; }
-.file-tree, .diff-list { display: grid; gap: 3px; max-height: 34vh; overflow: auto; }
+.file-tree, .diff-list { display: grid; gap: 2px; max-height: 34vh; overflow: auto; }
 .file-tree button, .diff-list button { padding: 8px 9px; border: 0; text-align: left; background: transparent; font-family: "Cascadia Code", Consolas, monospace; font-size: 11px; }
-.file-tree button span { margin-right: 7px; color: var(--signal); }
+.file-tree .tree-row { display: grid; grid-template-columns: 10px 14px minmax(0, 1fr); align-items: center; padding-left: calc(8px + var(--tree-depth) * 15px); border-radius: 4px; color: var(--ink); }
+.file-tree .disclosure { margin: 0; color: var(--muted); font-size: 16px; line-height: 10px; transition: transform 120ms ease; }
+.file-tree .folder[aria-expanded='true'] .disclosure { transform: rotate(90deg); }
+.file-tree .node-icon { width: 10px; height: 8px; margin: 0; border: 1px solid var(--signal); border-radius: 1px; opacity: .78; }
+.file-tree .folder .node-icon { height: 7px; border-color: #b07d35; background: color-mix(in srgb, #b07d35 12%, transparent); }
+.file-tree .node-name { min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: inherit; }
 .file-tree button:hover, .file-tree button.selected, .diff-list button:hover { background: var(--pine-soft); }
+.file-sync-bar { display: flex; align-items: center; gap: 9px; margin: -4px 0 10px; color: var(--muted); font-family: "Cascadia Code", Consolas, monospace; font-size: 10px; }
+.file-sync-bar > span:first-child { margin-right: auto; letter-spacing: .04em; }
+.file-sync-bar button { border: 0; background: transparent; color: var(--signal); font: inherit; }
+.live-indicator { display: inline-flex; align-items: center; gap: 5px; }
+.live-indicator i { width: 6px; height: 6px; border-radius: 50%; background: #2ea66f; box-shadow: 0 0 0 3px color-mix(in srgb, #2ea66f 16%, transparent); }
+.live-indicator.syncing i { animation: sync-pulse 800ms ease-in-out infinite alternate; }
+.tree-warning { color: #b06b2f; }
+@keyframes sync-pulse { to { opacity: .35; transform: scale(.72); } }
 .diff-list button span { display: inline-block; min-width: 59px; margin-right: 7px; color: var(--signal); font-family: Bahnschrift, sans-serif; font-size: 9px; text-transform: uppercase; }
 .code-preview { margin-top: 15px; }
 .code-preview strong { display: block; padding: 9px 11px; color: #dfeae1; background: #29352f; font-family: "Cascadia Code", monospace; font-size: 11px; }

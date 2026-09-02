@@ -10,8 +10,12 @@ const props = defineProps<{
   preview: WorkspaceFile | null
   error: string | null
   fileChanges: FileChange[]
+  loading: boolean
+  syncing: boolean
+  truncated: boolean
+  lastSyncedAt: number | null
 }>()
-defineEmits<{ selectFile: [path: string] }>()
+defineEmits<{ selectFile: [path: string], refresh: [] }>()
 const tab = ref<'files' | 'diff'>('files')
 const selectedDiff = ref<string | null>(null)
 const diff = computed(() => props.fileChanges.find(item => item.relative_path === selectedDiff.value) ?? null)
@@ -24,6 +28,17 @@ const diff = computed(() => props.fileChanges.find(item => item.relative_path ==
       <button class="tab" :class="{ active: tab === 'diff' }" role="tab" :aria-selected="tab === 'diff'" @click="tab = 'diff'">Diff</button>
     </div>
     <section v-if="tab === 'files'" class="workspace-pane" role="tabpanel">
+      <div class="file-sync-bar">
+        <span><strong>{{ files.length }}</strong> files</span>
+        <span v-if="truncated" class="tree-warning">仅显示部分文件</span>
+        <span
+          v-else class="live-indicator" :class="{ syncing }"
+          :title="lastSyncedAt ? `上次同步 ${new Date(lastSyncedAt).toLocaleTimeString()}` : '等待首次同步'"
+        >
+          <i aria-hidden="true" />{{ syncing ? '同步中' : '实时同步' }}
+        </span>
+        <button type="button" :disabled="loading || syncing" @click="$emit('refresh')">刷新</button>
+      </div>
       <FileTree :files="files" :selected-path="selectedPath" @select="$emit('selectFile', $event)" />
       <p v-if="files.length === 0" class="empty-copy">工作区中没有可预览文件</p>
       <p v-if="error" class="run-error" role="alert">{{ error }}</p>
