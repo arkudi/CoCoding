@@ -55,7 +55,7 @@ def test_start_returns_before_background_model_completes(manager_context) -> Non
     detail = manager.start(session_id, "inspect", model)
 
     assert detail.status == "running"
-    assert detail.max_steps == 50
+    assert detail.max_steps == 100
     assert model.entered.wait(1)
     assert manager.active_run_id == detail.id
     model.release.set()

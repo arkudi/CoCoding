@@ -45,7 +45,7 @@ class RunManager:
         self,
         session_factory: sessionmaker,
         event_hub: RunEventHub,
-        hard_step_limit: int = 50,
+        hard_step_limit: int = 100,
         verification_policy: VerificationPolicy | None = None,
         multi_agent_enabled: bool = False,
         max_delegations: int = 3,
