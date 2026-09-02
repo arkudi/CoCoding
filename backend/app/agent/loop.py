@@ -272,6 +272,7 @@ class AgentLoop:
             )
             self._rollback_repository()
 
+        failed_state_persisted = False
         try:
             self._repository.finish_run(
                 run_id,
@@ -279,12 +280,28 @@ class AgentLoop:
                 step_count=self._current_step_count,
                 error_text=_INTERNAL_ERROR,
             )
+            failed_state_persisted = True
         except Exception as finish_error:
             logger.exception(
                 "Could not persist failed run state (type=%s)",
                 type(finish_error).__name__,
             )
             self._rollback_repository()
+
+        if failed_state_persisted and self._event_sink is not None:
+            try:
+                detail = self._repository.get_run_detail(run_id)
+            except Exception as detail_error:
+                logger.exception(
+                    "Could not reload failed run detail (type=%s)",
+                    type(detail_error).__name__,
+                )
+                self._rollback_repository()
+            else:
+                if detail is None:
+                    logger.error("Could not reload failed run detail (run missing)")
+                else:
+                    self._emit("run.finished", run_id, asdict(detail))
 
         return AgentRunResult(
             "failed", self._current_step_count, None, _INTERNAL_ERROR

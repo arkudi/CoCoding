@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from app.agent.types import AssistantTurn
+from app.db.run_repository import RunRepository
 from tests.test_runs import _create_session, _wait_for_terminal
 
 
@@ -78,6 +79,95 @@ def test_websocket_sends_assistant_lifecycle_then_terminal_event(
         assert len(assistant_messages) == 1
         assert assistant_messages[0]["data"]["content"] == "Hello"
         assert events.index(assistant_messages[0]) < events.index(lifecycle[-1])
+
+
+def test_websocket_receives_terminal_event_after_assistant_persistence_failure(
+    app_factory, tmp_path: Path, monkeypatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    model = BlockingModel()
+    original_add_message = RunRepository.add_message
+    add_message_count = 0
+
+    def fail_assistant_message(self, *args, **kwargs):
+        nonlocal add_message_count
+        add_message_count += 1
+        if add_message_count == 2:
+            raise RuntimeError("raw assistant persistence detail")
+        return original_add_message(self, *args, **kwargs)
+
+    monkeypatch.setattr(RunRepository, "add_message", fail_assistant_message)
+
+    with app_factory(model) as client:
+        started = threading.Event()
+        release_started = threading.Event()
+        original_publish = client.app.state.event_hub.publish
+        terminal_persisted_statuses = []
+
+        def publish(event):
+            if event.type == "assistant.started":
+                started.set()
+                assert release_started.wait(2)
+            if event.type == "run.finished":
+                with client.app.state.session_factory() as db:
+                    detail = RunRepository(db).get_run_detail(event.run_id)
+                terminal_persisted_statuses.append(detail.status if detail else None)
+            original_publish(event)
+
+        monkeypatch.setattr(client.app.state.event_hub, "publish", publish)
+        session = _create_session(client, workspace)
+        created = client.post(
+            f"/api/sessions/{session['id']}/runs", json={"prompt": "inspect"}
+        ).json()
+        assert started.wait(1)
+
+        received = []
+        read_errors = []
+        socket_ready = threading.Event()
+        reader_done = threading.Event()
+        sockets = []
+
+        def read_events() -> None:
+            try:
+                with client.websocket_connect(
+                    f"/api/runs/{created['id']}/events"
+                ) as socket:
+                    sockets.append(socket)
+                    snapshot = socket.receive_json()
+                    assert snapshot["type"] == "run.snapshot"
+                    socket_ready.set()
+                    while True:
+                        event = socket.receive_json()
+                        received.append(event)
+                        if event["type"] == "run.finished":
+                            break
+            except BaseException as error:
+                read_errors.append(error)
+            finally:
+                reader_done.set()
+
+        reader = threading.Thread(target=read_events, daemon=True)
+        reader.start()
+        assert socket_ready.wait(1)
+        release_started.set()
+        assert model.entered.wait(1)
+        model.release.set()
+        try:
+            assert reader_done.wait(2), "WebSocket did not receive run.finished"
+        finally:
+            if not reader_done.is_set():
+                sockets[0].exit_stack.close()
+            reader.join(2)
+
+        assert read_errors == []
+        terminal = received[-1]
+        assert terminal["type"] == "run.finished"
+        assert terminal["data"]["status"] == "failed"
+        assert terminal_persisted_statuses == ["failed"]
+        durable = client.get(f"/api/runs/{created['id']}").json()
+        assert durable["status"] == "failed"
+        assert durable["error_text"] == "The run failed because of an internal error."
 
 
 def test_terminal_run_websocket_returns_one_snapshot(app_factory, tmp_path: Path) -> None:
