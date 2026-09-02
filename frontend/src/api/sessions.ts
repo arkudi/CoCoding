@@ -14,3 +14,6 @@ export const createSession = (payload: SessionCreate) =>
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   })
+
+export const deleteSession = (sessionId: string) =>
+  request<void>(`/api/sessions/${encodeURIComponent(sessionId)}`, { method: 'DELETE' })

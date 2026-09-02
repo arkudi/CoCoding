@@ -56,8 +56,20 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
 .form-actions { display: flex; gap: 8px; }
 .form-actions button { flex: 1; padding: 9px; border: 1px solid var(--line); border-radius: 3px; }
 .session-list { display: grid; gap: 5px; margin-top: 26px; }
-.session-list button { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; padding: 11px 10px; border: 0; border-left: 3px solid transparent; text-align: left; background: transparent; }
-.session-list button:hover, .session-list button.selected { border-left-color: var(--signal); background: #e5eadf; }
+.session-entry { display: grid; grid-template-columns: minmax(0, 1fr) 30px; align-items: center; border-left: 3px solid transparent; transition: background 140ms ease, border-color 140ms ease; }
+.session-entry:hover, .session-entry.selected { border-left-color: var(--signal); background: #e5eadf; }
+.session-select { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; min-width: 0; padding: 11px 7px; border: 0; text-align: left; background: transparent; }
+.session-select span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-delete { align-self: stretch; border: 0; color: var(--muted); background: transparent; cursor: pointer; font-size: 18px; opacity: 0; transition: color 140ms ease, opacity 140ms ease, background 140ms ease; }
+.session-entry:hover .session-delete, .session-delete:focus-visible { opacity: 1; }
+.session-delete:hover:not(:disabled) { color: var(--danger); background: rgba(166, 63, 50, .08); }
+.session-delete:disabled { cursor: not-allowed; opacity: .25; }
+.session-entry.confirming { grid-template-columns: minmax(0, 1fr) auto auto; gap: 5px; padding: 7px; border-left-color: var(--danger); background: #f5dfd7; }
+.delete-copy { color: #70362f; font-size: 11px; font-weight: 700; }
+.delete-confirm, .delete-cancel { padding: 5px 7px; border: 1px solid #c9a69d; border-radius: 3px; background: transparent; cursor: pointer; font-size: 10px; }
+.delete-confirm { color: white; border-color: var(--danger); background: var(--danger); }
+.delete-confirm:disabled { cursor: wait; opacity: .6; }
+.delete-cancel:hover { background: rgba(255, 255, 255, .45); }
 .session-list small { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
 
 .timeline { --timeline-gutter: clamp(26px, 5vw, 76px); min-width: 0; height: 100vh; padding: 42px 0 0; overflow: hidden; }
