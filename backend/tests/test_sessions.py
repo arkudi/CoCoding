@@ -86,7 +86,7 @@ def test_select_workspace_uses_native_picker(app_factory, tmp_path: Path) -> Non
     from tests.agent.fakes import ScriptedModelClient
 
     with app_factory(
-        ScriptedModelClient([]), directory_picker=lambda: str(tmp_path)
+        ScriptedModelClient([]), directory_picker=lambda _initial: str(tmp_path)
     ) as client:
         response = client.post("/api/sessions/select-workspace")
 
@@ -98,12 +98,31 @@ def test_select_workspace_returns_null_when_user_cancels(app_factory) -> None:
     from tests.agent.fakes import ScriptedModelClient
 
     with app_factory(
-        ScriptedModelClient([]), directory_picker=lambda: None
+        ScriptedModelClient([]), directory_picker=lambda _initial: None
     ) as client:
         response = client.post("/api/sessions/select-workspace")
 
     assert response.status_code == 200
     assert response.json() == {"path": None}
+
+
+def test_select_workspace_forwards_current_workspace_as_initial_directory(
+    app_factory, tmp_path: Path
+) -> None:
+    from tests.agent.fakes import ScriptedModelClient
+
+    received: list[str | None] = []
+    with app_factory(
+        ScriptedModelClient([]),
+        directory_picker=lambda initial: received.append(initial) or None,
+    ) as client:
+        response = client.post(
+            "/api/sessions/select-workspace",
+            json={"initial_path": str(tmp_path)},
+        )
+
+    assert response.status_code == 200
+    assert received == [str(tmp_path)]
 
 
 def test_delete_session_removes_history_but_preserves_workspace(

@@ -6,15 +6,25 @@ from sqlalchemy.orm import Session
 
 from app.db.repositories import SessionHasActiveRunError, SessionRepository
 from app.directory_picker import DirectoryPickerUnavailableError
-from app.schemas import DirectorySelectionRead, SessionCreate, SessionRead
+from app.schemas import (
+    DirectorySelectionCreate,
+    DirectorySelectionRead,
+    SessionCreate,
+    SessionRead,
+)
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 
 @router.post("/select-workspace", response_model=DirectorySelectionRead)
-def select_workspace(request: Request) -> DirectorySelectionRead:
+def select_workspace(
+    request: Request, payload: DirectorySelectionCreate | None = None
+) -> DirectorySelectionRead:
     try:
-        return DirectorySelectionRead(path=request.app.state.directory_picker())
+        initial_path = payload.initial_path if payload is not None else None
+        return DirectorySelectionRead(
+            path=request.app.state.directory_picker(initial_path)
+        )
     except DirectoryPickerUnavailableError as error:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(error)

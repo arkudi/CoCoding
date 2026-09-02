@@ -22,6 +22,12 @@ class DirectorySelectionRead(BaseModel):
     path: str | None
 
 
+class DirectorySelectionCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    initial_path: str | None = Field(default=None, min_length=1, max_length=1024)
+
+
 class SessionRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
