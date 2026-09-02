@@ -71,6 +71,7 @@ class AgentLoop:
         shared_budget: SharedStepBudget | None = None,
         system_prompt: str | None = None,
         execution_id: str | None = None,
+        completion_guard: Callable[[], ToolError | None] | None = None,
     ) -> None:
         self._model = model
         self._registry = registry
@@ -83,6 +84,7 @@ class AgentLoop:
         self._shared_budget = shared_budget
         self._system_prompt = system_prompt
         self._execution_id = execution_id
+        self._completion_guard = completion_guard
         self._current_step_count = 0
 
     def run(
@@ -138,7 +140,7 @@ class AgentLoop:
         for step_count in range(1, max_steps + 1):
             if token.is_cancelled:
                 return self._finish(run_id, self._effective_step_count(step_count - 1), "cancelled", None, _CANCELLED_ERROR)
-            if self._shared_budget is not None and not self._shared_budget.consume():
+            if self._shared_budget is not None and not self._shared_budget.consume(messages):
                 return self._finish(
                     run_id,
                     self._shared_budget.used,
@@ -183,7 +185,18 @@ class AgentLoop:
                     agent_execution_id=self._execution_id,
                 )
                 self._emit("tool.started", run_id, self._record_data(tool_call))
-                if call.name == "finish_task":
+                budget_error = None
+                if self._shared_budget is not None and not self._shared_budget.consume_tool_call():
+                    budget_error = ToolResult(
+                        False,
+                        None,
+                        ToolError("SHARED_BUDGET_EXHAUSTED", self._shared_budget.last_error),
+                        0,
+                    )
+                if budget_error is not None:
+                    result = budget_error
+                    completion = None
+                elif call.name == "finish_task":
                     if len(turn.tool_calls) != 1:
                         result = ToolResult(
                             False,
@@ -194,6 +207,11 @@ class AgentLoop:
                             ),
                             0,
                         )
+                        completion = None
+                    elif self._completion_guard is not None and (
+                        guard_error := self._completion_guard()
+                    ) is not None:
+                        result = ToolResult(False, None, guard_error, 0)
                         completion = None
                     else:
                         verification = CompletionVerifier(

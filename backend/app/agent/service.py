@@ -58,6 +58,9 @@ class AgentService:
         multi_agent_enabled: bool = False,
         max_delegations: int = 3,
         child_step_limit: int = 10,
+        token_budget: int = 200_000,
+        tool_call_limit: int = 200,
+        wall_clock_limit_seconds: int = 900,
     ) -> None:
         self.session_factory = session_factory
         self.model_client = model_client
@@ -66,6 +69,9 @@ class AgentService:
         self.multi_agent_enabled = multi_agent_enabled
         self.max_delegations = max_delegations
         self.child_step_limit = child_step_limit
+        self.token_budget = token_budget
+        self.tool_call_limit = tool_call_limit
+        self.wall_clock_limit_seconds = wall_clock_limit_seconds
 
     def execute(self, session_id: str, prompt: str, max_steps: int) -> RunDetail:
         if self.execution_lock is None:
@@ -149,7 +155,13 @@ class AgentService:
                                 },
                             )
                         )
-                    budget = SharedStepBudget(detail.max_steps)
+                    budget = SharedStepBudget(
+                        detail.max_steps,
+                        token_limit=self.token_budget,
+                        tool_call_limit=self.tool_call_limit,
+                        wall_clock_limit_seconds=self.wall_clock_limit_seconds,
+                        delegation_limit=self.max_delegations,
+                    )
                     coordinator = MultiAgentCoordinator(
                         model=self.model_client,
                         registry=ToolRegistry(workspace),
@@ -169,6 +181,7 @@ class AgentService:
                         "shared_budget": budget,
                         "system_prompt": build_manager_prompt(workspace.root),
                         "execution_id": manager.id,
+                        "completion_guard": coordinator.completion_guard,
                     }
                 loop = AgentLoop(
                     self.model_client,

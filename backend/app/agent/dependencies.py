@@ -34,6 +34,11 @@ def get_agent_service(
         multi_agent_enabled=request.app.state.settings.agent_multi_agent_enabled,
         max_delegations=request.app.state.settings.agent_max_delegations,
         child_step_limit=request.app.state.settings.agent_child_step_limit,
+        token_budget=request.app.state.settings.agent_token_budget,
+        tool_call_limit=request.app.state.settings.agent_tool_call_limit,
+        wall_clock_limit_seconds=(
+            request.app.state.settings.agent_wall_clock_limit_seconds
+        ),
     )
 
 

@@ -50,6 +50,9 @@ class RunManager:
         multi_agent_enabled: bool = False,
         max_delegations: int = 3,
         child_step_limit: int = 10,
+        token_budget: int = 200_000,
+        tool_call_limit: int = 200,
+        wall_clock_limit_seconds: int = 900,
     ) -> None:
         self._session_factory = session_factory
         self._hub = event_hub
@@ -58,6 +61,9 @@ class RunManager:
         self._multi_agent_enabled = multi_agent_enabled
         self._max_delegations = max_delegations
         self._child_step_limit = child_step_limit
+        self._token_budget = token_budget
+        self._tool_call_limit = tool_call_limit
+        self._wall_clock_limit_seconds = wall_clock_limit_seconds
         self._executor = ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="cocoding-agent"
         )
@@ -84,6 +90,9 @@ class RunManager:
                 multi_agent_enabled=self._multi_agent_enabled,
                 max_delegations=self._max_delegations,
                 child_step_limit=self._child_step_limit,
+                token_budget=self._token_budget,
+                tool_call_limit=self._tool_call_limit,
+                wall_clock_limit_seconds=self._wall_clock_limit_seconds,
             )
             detail = service.create_run(session_id, prompt, self._hard_step_limit)
             token = CancellationToken()
@@ -159,6 +168,9 @@ class RunManager:
                 multi_agent_enabled=self._multi_agent_enabled,
                 max_delegations=self._max_delegations,
                 child_step_limit=self._child_step_limit,
+                token_budget=self._token_budget,
+                tool_call_limit=self._tool_call_limit,
+                wall_clock_limit_seconds=self._wall_clock_limit_seconds,
             ).execute_existing(run_id, token, self._hub.publish)
             with self._session_factory() as db:
                 RunRepository(db).set_session_status(

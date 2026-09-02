@@ -47,6 +47,9 @@ def create_app(
             multi_agent_enabled=resolved.agent_multi_agent_enabled,
             max_delegations=resolved.agent_max_delegations,
             child_step_limit=resolved.agent_child_step_limit,
+            token_budget=resolved.agent_token_budget,
+            tool_call_limit=resolved.agent_tool_call_limit,
+            wall_clock_limit_seconds=resolved.agent_wall_clock_limit_seconds,
         )
         db = application.state.session_factory()
         try:
