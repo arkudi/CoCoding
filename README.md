@@ -102,6 +102,17 @@ npm test
 npm run build
 ```
 
+Run the deterministic agent evaluation suite with a configured DeepSeek key:
+
+```powershell
+python -m app.evals backend/eval_suites/coding_baseline.json
+```
+
+Evaluation cases run in isolated temporary workspaces and report status, step count,
+tool calls, tool failures, file assertions, response assertions, latency, and an
+overall pass/fail result as JSON. Add cases to the suite before changing agent
+behavior so improvements can be compared against a stable baseline.
+
 ## Configuration
 
 Application configuration uses the `COCODING_` prefix, including `COCODING_DATABASE_URL` and `COCODING_FRONTEND_DIST`. DeepSeek configuration uses the unprefixed `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL`, and `DEEPSEEK_MODEL` names shown in `.env.example`. A local `.env` file is ignored by Git and may hold machine-specific settings; never commit credentials. `.env.example` intentionally leaves `DEEPSEEK_API_KEY` blank.
