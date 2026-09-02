@@ -38,3 +38,18 @@ def test_queue_overflow_collapses_to_resync_event() -> None:
         assert event.run_id == "run-1"
 
     asyncio.run(exercise())
+
+
+def test_queue_overflow_preserves_incoming_terminal_event() -> None:
+    async def exercise() -> None:
+        hub = RunEventHub(queue_size=1)
+        subscription = hub.subscribe("run-1")
+        terminal = RunEvent.create("run.finished", "run-1", {"status": "failed"})
+
+        hub.publish(RunEvent.create("tool.finished", "run-1", {"id": "one"}))
+        hub.publish(terminal)
+        await asyncio.sleep(0)
+
+        assert await asyncio.wait_for(subscription.receive(), 1) == terminal
+
+    asyncio.run(exercise())

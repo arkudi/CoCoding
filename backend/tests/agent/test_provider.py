@@ -96,6 +96,59 @@ def test_complete_rejects_tool_stream_without_id_or_name():
     assert captured.value.code == "protocol_error"
 
 
+def test_complete_rejects_tool_fragment_without_index():
+    fragment = SimpleNamespace(
+        id="call_1",
+        function=SimpleNamespace(name="read_file", arguments='{"path":"a.py"}'),
+    )
+    stream = iter([
+        SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(
+            content=None, tool_calls=[fragment],
+        ))])
+    ])
+
+    with pytest.raises(ModelProtocolError) as captured:
+        DeepSeekClient(_client_returning(stream), "deepseek-v4-flash").complete([], [])
+
+    assert captured.value.code == "protocol_error"
+    assert captured.value.safe_message == "The model provider returned an invalid response."
+
+
+@pytest.mark.parametrize(
+    "index",
+    [
+        pytest.param(-1, id="negative"),
+        pytest.param("0", id="string"),
+        pytest.param(True, id="boolean"),
+    ],
+)
+def test_complete_rejects_tool_fragment_with_invalid_index(index):
+    stream = iter([
+        _tool_chunk(
+            index,
+            call_id="call_1",
+            name="read_file",
+            arguments='{"path":"a.py"}',
+        )
+    ])
+
+    with pytest.raises(ModelProtocolError) as captured:
+        DeepSeekClient(_client_returning(stream), "deepseek-v4-flash").complete([], [])
+
+    assert captured.value.code == "protocol_error"
+    assert captured.value.safe_message == "The model provider returned an invalid response."
+
+
+def test_complete_rejects_empty_stream():
+    with pytest.raises(ModelProtocolError) as captured:
+        DeepSeekClient(
+            _client_returning(iter([])), "deepseek-v4-flash"
+        ).complete([], [])
+
+    assert captured.value.code == "protocol_error"
+    assert captured.value.safe_message == "The model provider returned an invalid response."
+
+
 def test_complete_does_not_retry_after_visible_output(monkeypatch):
     """Retrying after delivering a visible partial response must fail this test."""
     import app.agent.provider as provider
@@ -191,6 +244,7 @@ def test_complete_disables_thinking_and_converts_tool_calls():
                             content=None,
                             tool_calls=[
                                 SimpleNamespace(
+                                    index=0,
                                     id="call_1",
                                     function=SimpleNamespace(
                                         name="read_file", arguments='{"path":"a.py"}'

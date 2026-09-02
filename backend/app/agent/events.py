@@ -82,5 +82,6 @@ class RunEventHub:
         if subscription.queue.full():
             while not subscription.queue.empty():
                 subscription.queue.get_nowait()
-            event = RunEvent.create("run.resync_required", subscription.run_id, {})
+            if event.type != "run.finished":
+                event = RunEvent.create("run.resync_required", subscription.run_id, {})
         subscription.queue.put_nowait(event)

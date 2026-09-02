@@ -1,11 +1,15 @@
+import asyncio
 import threading
+from dataclasses import asdict
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
+from app.agent.events import RunEvent, RunEventHub
 from app.agent.types import AssistantTurn
+from app.api.runs import run_events
 from app.db.run_repository import RunRepository
 from tests.test_runs import _create_session, _wait_for_terminal
 
@@ -168,6 +172,72 @@ def test_websocket_receives_terminal_event_after_assistant_persistence_failure(
         durable = client.get(f"/api/runs/{created['id']}").json()
         assert durable["status"] == "failed"
         assert durable["error_text"] == "The run failed because of an internal error."
+
+
+def test_websocket_exits_when_terminal_event_overflows_full_queue(
+    app_factory, tmp_path: Path
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    with app_factory(object()) as client:
+        session = _create_session(client, workspace)
+        with client.app.state.session_factory() as db:
+            run = RunRepository(db).create_run(
+                session_id=session["id"],
+                prompt="inspect",
+                model="fake",
+                prompt_version="coding_agent_v1",
+                max_steps=20,
+            )
+            run_id = run.id
+
+        hub = RunEventHub(queue_size=1)
+        client.app.state.event_hub = hub
+
+        class OverflowingWebSocket:
+            def __init__(self) -> None:
+                self.app = client.app
+                self.sent: list[dict[str, object]] = []
+
+            async def accept(self) -> None:
+                pass
+
+            async def close(self, code: int) -> None:
+                raise AssertionError(f"unexpected close: {code}")
+
+            async def send_json(self, payload: dict[str, object]) -> None:
+                self.sent.append(payload)
+                if len(self.sent) != 1:
+                    return
+                with client.app.state.session_factory() as db:
+                    repository = RunRepository(db)
+                    repository.finish_run(
+                        run_id,
+                        "failed",
+                        step_count=1,
+                        error_text="durable failure",
+                    )
+                    detail = repository.get_run_detail(run_id)
+                assert detail is not None
+                hub.publish(RunEvent.create("files.changed", run_id, []))
+                hub.publish(RunEvent.create("run.finished", run_id, asdict(detail)))
+
+        websocket = OverflowingWebSocket()
+
+        async def exercise() -> None:
+            await asyncio.wait_for(run_events(websocket, run_id), 1)  # type: ignore[arg-type]
+
+        asyncio.run(exercise())
+
+        assert [payload["type"] for payload in websocket.sent] == [
+            "run.snapshot",
+            "run.finished",
+        ]
+        assert websocket.sent[-1]["data"]["status"] == "failed"  # type: ignore[index]
+        durable = client.get(f"/api/runs/{run_id}").json()
+        assert durable["status"] == "failed"
+        assert durable["error_text"] == "durable failure"
 
 
 def test_terminal_run_websocket_returns_one_snapshot(app_factory, tmp_path: Path) -> None:

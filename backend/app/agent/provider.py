@@ -75,9 +75,11 @@ class DeepSeekClient(ModelClient):
                 )
                 parts: list[str] = []
                 tool_parts: dict[int, _ToolCallParts] = {}
+                saw_choice = False
                 for chunk in stream:
                     if not chunk.choices:
                         raise ModelProtocolError()
+                    saw_choice = True
                     delta = chunk.choices[0].delta
                     content = getattr(delta, "content", None)
                     if content:
@@ -86,7 +88,13 @@ class DeepSeekClient(ModelClient):
                         if on_text_delta is not None:
                             on_text_delta(content)
                     for fragment in getattr(delta, "tool_calls", None) or ():
-                        index = getattr(fragment, "index", 0)
+                        index = getattr(fragment, "index", None)
+                        if (
+                            isinstance(index, bool)
+                            or not isinstance(index, int)
+                            or index < 0
+                        ):
+                            raise ModelProtocolError()
                         current = tool_parts.setdefault(index, _ToolCallParts())
                         if fragment.id:
                             current.id += fragment.id
@@ -96,6 +104,8 @@ class DeepSeekClient(ModelClient):
                                 current.name += function.name
                             if function.arguments:
                                 current.arguments += function.arguments
+                if not saw_choice:
+                    raise ModelProtocolError()
                 tool_calls = []
                 for index in sorted(tool_parts):
                     current = tool_parts[index]

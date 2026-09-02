@@ -289,6 +289,7 @@ class AgentLoop:
             self._rollback_repository()
 
         if failed_state_persisted and self._event_sink is not None:
+            terminal_data: object = {"status": "failed"}
             try:
                 detail = self._repository.get_run_detail(run_id)
             except Exception as detail_error:
@@ -301,7 +302,8 @@ class AgentLoop:
                 if detail is None:
                     logger.error("Could not reload failed run detail (run missing)")
                 else:
-                    self._emit("run.finished", run_id, asdict(detail))
+                    terminal_data = asdict(detail)
+            self._emit("run.finished", run_id, terminal_data)
 
         return AgentRunResult(
             "failed", self._current_step_count, None, _INTERNAL_ERROR

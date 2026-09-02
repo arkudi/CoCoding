@@ -30,7 +30,9 @@ export const useRunsStore = defineStore('runs', {
     connection: 'disconnected' as ConnectionState,
     cancelling: false,
     generation: 0,
+    reconciliation_revision_by_run: {} as Record<string, number>,
     reconnect_attempt: 0,
+    reconnect_exhausted: false,
     socket: null as api.RunEventConnection | null,
     reconnect_timer: null as ReturnType<typeof setTimeout> | null,
   }),
@@ -127,20 +129,31 @@ export const useRunsStore = defineStore('runs', {
         await this.reconcile(event.run_id)
       }
     },
-    async reconcile(runId: string) {
+    async reconcile(runId: string, clearDraftOnFailure = false) {
+      const revision = (this.reconciliation_revision_by_run[runId] ?? 0) + 1
+      this.reconciliation_revision_by_run[runId] = revision
       try {
         const refreshed = await api.getRun(runId)
-        this.replaceRun(refreshed)
-        if (terminal.has(refreshed.status)) {
+        if (this.reconciliation_revision_by_run[runId] !== revision) return
+        const isSelected = this.selected_id === runId
+        this.replaceRun(refreshed, isSelected)
+        if (terminal.has(refreshed.status) && isSelected) {
           this.cancelling = false
           this.disconnect()
         }
       } catch (error) {
-        this.error = error instanceof Error ? error.message : '同步运行状态失败'
+        if (this.reconciliation_revision_by_run[runId] === revision) {
+          this.error = error instanceof Error && error.message
+            ? error.message
+            : '同步运行状态失败'
+          if (clearDraftOnFailure && this.selected_id === runId) {
+            delete this.draft_by_run[runId]
+          }
+        }
       }
     },
-    replaceRun(run: Run) {
-      delete this.draft_by_run[run.id]
+    replaceRun(run: Run, clearDraft = true) {
+      if (clearDraft) delete this.draft_by_run[run.id]
       this.details[run.id] = run
       this.history_by_session[run.session_id] = upsert(
         this.history_by_session[run.session_id] ?? [], run,
@@ -148,8 +161,16 @@ export const useRunsStore = defineStore('runs', {
       useSessionsStore().upsertStatus(run.session_id, run.status)
     },
     scheduleReconnect(runId: string) {
-      if (this.details[runId]?.status !== 'running' || this.reconnect_attempt >= 3) {
+      if (this.details[runId]?.status !== 'running') {
         this.connection = 'disconnected'
+        return
+      }
+      if (this.reconnect_attempt >= 3) {
+        this.connection = 'disconnected'
+        if (!this.reconnect_exhausted) {
+          this.reconnect_exhausted = true
+          void this.reconcile(runId, true)
+        }
         return
       }
       const delay = [250, 500, 1000][this.reconnect_attempt++]
@@ -181,6 +202,7 @@ export const useRunsStore = defineStore('runs', {
       this.socket = null
       this.connection = 'disconnected'
       this.reconnect_attempt = 0
+      this.reconnect_exhausted = false
     },
   },
 })
