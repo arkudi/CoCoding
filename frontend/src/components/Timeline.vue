@@ -1,9 +1,10 @@
 <script setup lang="ts">
+import { computed, nextTick, ref, watch } from 'vue'
 import RunComposer from './RunComposer.vue'
-import ToolCallCard from './ToolCallCard.vue'
+import ToolChain from './ToolChain.vue'
 import type { Run, RunCreate } from '@/types/run'
 
-defineProps<{
+const props = defineProps<{
   title?: string
   history: Run[]
   selected: Run | null
@@ -13,7 +14,6 @@ defineProps<{
   error: string | null
 }>()
 defineEmits<{
-  select: [runId: string]
   submit: [payload: RunCreate]
   cancel: []
 }>()
@@ -22,10 +22,42 @@ const statusCopy: Record<string, string> = {
   running: '执行中', completed: '已完成', failed: '失败', max_steps: '达到步数上限',
   cancelled: '已取消', interrupted: '已中断',
 }
+
+const chronologicalHistory = computed(() => [...props.history].sort((left, right) => {
+  const difference = new Date(left.created_at).getTime() - new Date(right.created_at).getTime()
+  return difference || left.id.localeCompare(right.id)
+}))
+const timelineElement = ref<HTMLElement | null>(null)
+const followsLatest = ref(true)
+const conversationRevision = computed(() => props.history
+  .map(run => `${run.id}:${run.tool_calls.length}:${run.final_response?.length ?? -1}:${run.error_text ?? ''}`)
+  .join('|'))
+
+watch([conversationRevision, () => props.draft], async () => {
+  await nextTick()
+  if (timelineElement.value && followsLatest.value) {
+    timelineElement.value.scrollTop = timelineElement.value.scrollHeight
+  }
+})
+
+function updateFollowState() {
+  const element = timelineElement.value
+  if (!element) return
+  followsLatest.value = element.scrollHeight - element.scrollTop - element.clientHeight <= 80
+}
+
+function responseFor(run: Run) {
+  if (run.final_response !== null) return run.final_response
+  return props.selected?.id === run.id ? props.draft : ''
+}
+
+function isStreaming(run: Run) {
+  return props.selected?.id === run.id && props.streaming
+}
 </script>
 
 <template>
-  <main class="timeline" aria-label="执行过程">
+  <main ref="timelineElement" class="timeline" aria-label="执行过程" @scroll="updateFollowState">
     <div v-if="!title" class="empty-state">
       <span class="eyebrow">LOCAL CODING AGENT</span>
       <h1>准备开始</h1>
@@ -36,25 +68,21 @@ const statusCopy: Record<string, string> = {
         <div><span class="eyebrow">LOCAL AGENT SESSION</span><h1>{{ title }}</h1></div>
         <span v-if="selected" class="run-status" :data-status="selected.status">{{ statusCopy[selected.status] }}</span>
       </header>
-      <nav v-if="history.length" class="run-history" aria-label="运行历史">
-        <button
-          v-for="run in history" :key="run.id" type="button"
-          :class="{ selected: selected?.id === run.id }" @click="$emit('select', run.id)"
-        >{{ new Date(run.created_at).toLocaleString() }} · {{ statusCopy[run.status] }}</button>
-      </nav>
-      <section v-if="selected" class="run-evidence" aria-live="polite">
-        <article class="message user-message"><span>任务</span><p>{{ selected.prompt }}</p></article>
-        <ToolCallCard v-for="call in selected.tool_calls" :key="call.id" :call="call" />
-        <article
-          v-if="selected.final_response !== null || draft"
-          class="message assistant-message"
-          :class="{ streaming }"
-        >
-          <span>Agent</span>
-          <p>{{ selected.final_response !== null ? selected.final_response : draft }}</p>
-          <small v-if="streaming" class="streaming-status" role="status">正在生成</small>
-        </article>
-        <p v-if="selected.error_text" class="run-error" role="alert">{{ selected.error_text }}</p>
+      <section v-if="chronologicalHistory.length" class="conversation-feed" aria-live="polite">
+        <section v-for="run in chronologicalHistory" :key="run.id" class="conversation-turn">
+          <article class="message user-message"><span>你</span><p>{{ run.prompt }}</p></article>
+          <ToolChain v-if="run.tool_calls.length" :calls="run.tool_calls" />
+          <article
+            v-if="run.final_response !== null || responseFor(run)"
+            class="message assistant-message"
+            :class="{ streaming: isStreaming(run) }"
+          >
+            <span>Agent</span>
+            <p>{{ responseFor(run) }}</p>
+            <small v-if="isStreaming(run)" class="streaming-status" role="status">正在生成</small>
+          </article>
+          <p v-if="run.error_text" class="run-error" role="alert">{{ run.error_text }}</p>
+        </section>
       </section>
       <p v-if="error" class="run-error" role="alert">{{ error }}</p>
       <RunComposer

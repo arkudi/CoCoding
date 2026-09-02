@@ -38,7 +38,6 @@ watch(
       :streaming="runs.selected_draft?.active ?? false"
       :cancelling="runs.cancelling"
       :error="runs.error"
-      @select="runs.selectRun"
       @submit="current && runs.submit(current.id, $event)"
       @cancel="runs.requestCancel"
     />
