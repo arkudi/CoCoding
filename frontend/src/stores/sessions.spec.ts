@@ -38,3 +38,69 @@ test('keeps a newly created session when an earlier history load resolves late',
   expect(sessions.items).toEqual([created, existing])
   expect(sessions.current_id).toBe(created.id)
 })
+
+test('removes the current session and selects its neighbor', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 204 })))
+  const sessions = useSessionsStore()
+  sessions.items = [
+    {
+      id: 'first', title: 'First task', workspace_path: 'F:/first', status: 'idle',
+      created_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-01T00:00:00Z',
+    },
+    {
+      id: 'second', title: 'Second task', workspace_path: 'F:/second', status: 'completed',
+      created_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-01T00:00:00Z',
+    },
+  ]
+  sessions.current_id = 'first'
+
+  expect(await sessions.remove('first')).toBe(true)
+
+  expect(sessions.items.map(item => item.id)).toEqual(['second'])
+  expect(sessions.current_id).toBe('second')
+  expect(sessions.deleting_ids).toEqual([])
+})
+
+test('keeps the session and reports an API deletion error', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+    detail: '正在执行的任务不能删除，请先取消任务',
+  }), { status: 409 })))
+  const sessions = useSessionsStore()
+  sessions.items = [{
+    id: 'running', title: 'Running task', workspace_path: 'F:/work', status: 'running',
+    created_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-01T00:00:00Z',
+  }]
+  sessions.current_id = 'running'
+
+  expect(await sessions.remove('running')).toBe(false)
+
+  expect(sessions.items).toHaveLength(1)
+  expect(sessions.current_id).toBe('running')
+  expect(sessions.error).toBe('正在执行的任务不能删除，请先取消任务')
+})
+
+test('does not restore a deleted session when an older history load finishes', async () => {
+  let resolveList: (response: Response) => void
+  const slowList = new Promise<Response>((resolve) => {
+    resolveList = resolve
+  })
+  const deleted = {
+    id: 'deleted', title: 'Deleted task', workspace_path: 'F:/deleted', status: 'idle' as const,
+    created_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-01T00:00:00Z',
+  }
+  vi.stubGlobal('fetch', vi.fn()
+    .mockResolvedValueOnce(slowList)
+    .mockResolvedValueOnce(new Response(null, { status: 204 })))
+  const sessions = useSessionsStore()
+  sessions.items = [deleted]
+  sessions.current_id = deleted.id
+
+  const loading = sessions.load()
+  await sessions.remove(deleted.id)
+  resolveList!(new Response(JSON.stringify([deleted]), { status: 200 }))
+  await loading
+
+  expect(sessions.items).toEqual([])
+  expect(sessions.current_id).toBeNull()
+  expect(sessions.loading).toBe(false)
+})

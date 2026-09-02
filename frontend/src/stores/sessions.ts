@@ -10,6 +10,7 @@ export const useSessionsStore = defineStore('sessions', {
     loading: false,
     error: null as string | null,
     load_id: 0,
+    deleting_ids: [] as string[],
   }),
   actions: {
     select(session_id: string) {
@@ -61,6 +62,29 @@ export const useSessionsStore = defineStore('sessions', {
       const selection = await sessionApi.selectWorkspace()
       if (!selection.path) return null
       return this.create({ workspace_path: selection.path })
+    },
+    async remove(session_id: string) {
+      if (this.deleting_ids.includes(session_id)) return false
+      this.deleting_ids.push(session_id)
+      this.error = null
+      try {
+        await sessionApi.deleteSession(session_id)
+        const index = this.items.findIndex(item => item.id === session_id)
+        if (index < 0) return true
+        this.load_id += 1
+        this.loading = false
+        const was_current = this.current_id === session_id
+        this.items.splice(index, 1)
+        if (was_current) {
+          this.current_id = this.items[index]?.id ?? this.items[index - 1]?.id ?? null
+        }
+        return true
+      } catch (error) {
+        this.error = error instanceof Error ? error.message : '删除任务失败'
+        return false
+      } finally {
+        this.deleting_ids = this.deleting_ids.filter(id => id !== session_id)
+      }
     },
   },
 })
