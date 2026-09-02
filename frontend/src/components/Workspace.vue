@@ -14,7 +14,6 @@ const props = defineProps<{
   loading: boolean
   syncing: boolean
   truncated: boolean
-  lastSyncedAt: number | null
 }>()
 defineEmits<{ selectFile: [path: string], refresh: [] }>()
 const tab = ref<'files' | 'diff'>('files')
@@ -39,12 +38,6 @@ const diff = computed(() => props.fileChanges.find(item => item.relative_path ==
       <div class="file-sync-bar">
         <span><strong>{{ files.length }}</strong> files</span>
         <span v-if="truncated" class="tree-warning">仅显示部分文件</span>
-        <span
-          v-else class="live-indicator" :class="{ syncing }"
-          :title="lastSyncedAt ? `上次同步 ${new Date(lastSyncedAt).toLocaleTimeString()}` : '等待首次同步'"
-        >
-          <i aria-hidden="true" />{{ syncing ? '同步中' : '实时同步' }}
-        </span>
         <button type="button" :disabled="loading || syncing" @click="$emit('refresh')">刷新</button>
       </div>
       <FileTree :files="files" :selected-path="selectedPath" @select="$emit('selectFile', $event)" />

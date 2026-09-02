@@ -57,7 +57,6 @@ watch(
       :loading="workspace.loading"
       :syncing="workspace.syncing"
       :truncated="workspace.truncated"
-      :last-synced-at="workspace.last_synced_at"
       :file-changes="runs.selected?.file_changes ?? []"
       @select-file="current && workspace.selectFile(current.id, $event)"
       @refresh="current && workspace.sync(current.id)"
