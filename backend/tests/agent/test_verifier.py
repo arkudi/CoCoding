@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -176,3 +177,27 @@ def test_loop_accepts_test_claim_with_matching_command_evidence(run_context) -> 
 
     assert result.status == "completed"
     assert run_context.repository.get_run_detail(run_context.run.id).tool_calls[-1].status == "succeeded"
+
+
+def test_finish_task_verifies_file_created_by_command(run_context) -> None:
+    command = (
+        f'"{sys.executable}" -c "from pathlib import Path; '
+        "Path('command.txt').write_text('made', encoding='utf-8')\""
+    )
+    model = ScriptedModelClient([
+        AssistantTurn(None, (call("run_command", {"command": command}, "c1"),)),
+        finish("Created by command.", changed_files=["command.txt"]),
+    ])
+
+    result = run_context.loop(model).run(
+        run_id=run_context.run.id,
+        session_id=run_context.session.id,
+        prompt="create through a command",
+        prior_messages=[],
+        max_steps=5,
+    )
+
+    assert result.status == "completed"
+    detail = run_context.repository.get_run_detail(run_context.run.id)
+    assert detail.file_changes[0].path == "command.txt"
+    assert detail.file_changes[0].operation == "created"

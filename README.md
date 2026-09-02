@@ -77,11 +77,11 @@ curl.exe -sS -X POST "http://127.0.0.1:8000/api/sessions/$($session.id)/runs" `
 
 The returned Run initially has status `running`. Follow `ws://127.0.0.1:8000/api/runs/{run_id}/events`, or query `GET /api/runs/{run_id}`. Run history is available from `GET /api/sessions/{session_id}/runs`.
 
-The model can submit a structured `finish_task` call containing its summary, changed
-files, tests, and unresolved issues. The runtime verifies file claims against workspace
-write evidence and test claims against recorded command results. Unsupported claims are
-returned to the model for correction instead of completing the Run. Plain-text final
-responses remain supported for compatibility.
+The model submits a structured `finish_task` call containing its summary, changed files,
+tests, and unresolved issues. The runtime verifies file claims against a full workspace
+baseline and test claims against recorded command results. This includes files created,
+modified, deleted, or renamed by commands. Unsupported claims are returned to the model
+for correction instead of completing the Run; plain text alone cannot finish a Run.
 
 Visible assistant text is streamed through `assistant.started`, `assistant.delta`, and `assistant.finished` WebSocket events. Deltas are
 transient UI state; complete assistant messages and terminal Run state remain

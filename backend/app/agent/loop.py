@@ -106,6 +106,7 @@ class AgentLoop:
         cancellation: CancellationToken | None = None,
     ) -> AgentRunResult:
         token = cancellation or CancellationToken()
+        self._workspace.capture_baseline()
         messages = [
             {
                 "role": "system",
