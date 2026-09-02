@@ -14,7 +14,7 @@ const running: Run = {
   prompt_version: 'v1', status: 'running', max_steps: 20, step_count: 0,
   final_response: null, error_text: null, created_at: '2026-09-01T00:00:00Z',
   updated_at: '2026-09-01T00:00:00Z', finished_at: null,
-  messages: [], tool_calls: [], file_changes: [], agent_executions: [],
+  messages: [], tool_calls: [], file_changes: [], agent_executions: [], agent_tasks: [],
 }
 
 let handlers: { onEvent(event: RunEvent): void, onError(): void, onClose(): void }
@@ -123,7 +123,7 @@ test('deferred reconciliation for another run cannot disconnect the selection', 
 
   const runB: Run = {
     ...running, id: 'run-2', session_id: 'session-2', messages: [], tool_calls: [],
-    file_changes: [], agent_executions: [],
+    file_changes: [], agent_executions: [], agent_tasks: [],
   }
   store.details[runB.id] = runB
   store.selectRun(runB.id)
@@ -196,6 +196,26 @@ test('upserts live agent execution state', async () => {
   expect(store.selected?.agent_executions).toHaveLength(1)
   expect(store.selected?.agent_executions[0].status).toBe('completed')
   expect(store.selected?.agent_executions[0].step_count).toBe(2)
+})
+
+test('upserts live task graph state', async () => {
+  api.createRun.mockResolvedValue(running)
+  const store = useRunsStore()
+  await store.submit('session-1', { prompt: 'inspect' })
+  const task = {
+    id: 'task-1', run_id: 'run-1', execution_id: null, role: 'explorer' as const,
+    description: 'inspect', expected_output: 'findings', depends_on: [],
+    status: 'pending' as const, result_json: null, created_at: running.created_at,
+    started_at: null, finished_at: null,
+  }
+
+  handlers.onEvent(event('task.created', task))
+  handlers.onEvent(event('task.started', {
+    ...task, execution_id: 'agent-1', status: 'running', started_at: running.updated_at,
+  }))
+
+  expect(store.selected?.agent_tasks).toHaveLength(1)
+  expect(store.selected?.agent_tasks[0].status).toBe('running')
 })
 
 test('replaces a stale draft when a new assistant turn starts', async () => {

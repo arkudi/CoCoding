@@ -82,8 +82,8 @@ def test_eval_runner_reports_multi_agent_roles_and_mode_metrics() -> None:
         orchestration="multi",
         expect=EvalExpectations(
             files_equal={"note.txt": "done"},
-            required_agent_roles=["manager", "implementer"],
-            max_steps=4,
+            required_agent_roles=["manager", "implementer", "reviewer"],
+            max_steps=7,
         ),
     )
     model = ScriptedModelClient(
@@ -109,8 +109,32 @@ def test_eval_runner_reports_multi_agent_roles_and_mode_metrics() -> None:
                     "changed_files": ["note.txt"],
                     "tests": [],
                     "unresolved_issues": [],
+                    "verdict": None,
                 },
                 "worker-finish",
+            ),
+            tool_turn(
+                "delegate_task",
+                {
+                    "role": "reviewer",
+                    "task": "Review note.txt",
+                    "expected_output": "An independent verdict.",
+                },
+                "delegate-reviewer",
+            ),
+            tool_turn("get_diff", {}, "review-diff"),
+            tool_turn(
+                "finish_subtask",
+                {
+                    "summary": "The change is correct.",
+                    "relevant_files": ["note.txt"],
+                    "findings": [],
+                    "changed_files": [],
+                    "tests": [],
+                    "unresolved_issues": [],
+                    "verdict": "approved",
+                },
+                "reviewer-finish",
             ),
             finish("Created note.txt.", changed_files=["note.txt"]),
         ]
@@ -121,10 +145,10 @@ def test_eval_runner_reports_multi_agent_roles_and_mode_metrics() -> None:
     )
 
     assert report.passed is True
-    assert report.cases[0].agent_executions == 2
-    assert report.cases[0].step_count == 4
+    assert report.cases[0].agent_executions == 3
+    assert report.cases[0].step_count == 7
     assert report.modes == (
         report.modes[0],
     )
     assert report.modes[0].orchestration == "multi"
-    assert report.modes[0].average_steps == 4
+    assert report.modes[0].average_steps == 7

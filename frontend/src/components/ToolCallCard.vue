@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ToolCall } from '@/types/run'
 
-defineProps<{ call: ToolCall }>()
+defineProps<{ call: ToolCall, agentRole?: string }>()
 
 function formatJson(value: string | null) {
   if (!value) return '暂无结果'
@@ -18,6 +18,7 @@ function formatJson(value: string | null) {
     <summary>
       <span class="tool-icon">⌁</span>
       <strong>{{ call.name }}</strong>
+      <span v-if="agentRole" class="status-pill">{{ agentRole }}</span>
       <span class="status-pill" :data-status="call.status">{{ call.status }}</span>
       <span v-if="call.duration_ms !== null" class="duration">{{ call.duration_ms }} ms</span>
     </summary>

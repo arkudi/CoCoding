@@ -9,6 +9,8 @@ from app.agent.workspace import FileChangeEvidence
 from app.db.models import (
     RUN_STATUSES,
     AgentExecutionRecord,
+    AgentTaskRecord,
+    AgentToolCallRecord,
     FileChangeRecord,
     MessageRecord,
     RunRecord,
@@ -51,6 +53,7 @@ class ToolCallDetail:
     duration_ms: int | None
     started_at: datetime
     finished_at: datetime | None
+    agent_execution_id: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +83,22 @@ class AgentExecutionDetail:
 
 
 @dataclass(frozen=True, slots=True)
+class AgentTaskDetail:
+    id: str
+    run_id: str
+    execution_id: str | None
+    role: str
+    description: str
+    expected_output: str
+    depends_on: tuple[str, ...]
+    status: str
+    result_json: str | None
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
 class RunDetail:
     id: str
     session_id: str
@@ -98,6 +117,7 @@ class RunDetail:
     tool_calls: tuple[ToolCallDetail, ...]
     file_changes: tuple[FileChangeDetail, ...]
     agent_executions: tuple[AgentExecutionDetail, ...]
+    agent_tasks: tuple[AgentTaskDetail, ...]
 
 
 class RunRepository:
@@ -155,8 +175,13 @@ class RunRepository:
         provider_call_id: str,
         name: str,
         arguments_json: str,
+        agent_execution_id: str | None = None,
     ) -> ToolCallRecord:
         self._require_run(run_id)
+        if agent_execution_id is not None:
+            execution = self._require_agent_execution(agent_execution_id)
+            if execution.run_id != run_id:
+                raise ValueError("Agent execution does not belong to the run")
         record = ToolCallRecord(
             run_id=run_id,
             provider_call_id=provider_call_id,
@@ -164,8 +189,67 @@ class RunRepository:
             arguments_json=arguments_json,
         )
         self.db.add(record)
+        self.db.flush()
+        if agent_execution_id is not None:
+            self.db.add(
+                AgentToolCallRecord(
+                    tool_call_id=record.id, agent_execution_id=agent_execution_id
+                )
+            )
+        self.db.refresh(record)
+        self.db.commit()
+        return record
+
+    def create_agent_task(
+        self,
+        run_id: str,
+        *,
+        role: str,
+        description: str,
+        expected_output: str,
+        depends_on: tuple[str, ...] = (),
+    ) -> AgentTaskRecord:
+        self._require_run(run_id)
+        for dependency_id in depends_on:
+            dependency = self._require_agent_task(dependency_id)
+            if dependency.run_id != run_id:
+                raise ValueError("Agent task dependency does not belong to the run")
+        record = AgentTaskRecord(
+            run_id=run_id,
+            role=role,
+            description=description,
+            expected_output=expected_output,
+            depends_on_json=json.dumps(depends_on),
+        )
+        self.db.add(record)
         self._flush_refresh_and_commit(record)
         return record
+
+    def start_agent_task(self, task_id: str, execution_id: str) -> AgentTaskRecord:
+        task = self._require_agent_task(task_id)
+        execution = self._require_agent_execution(execution_id)
+        if task.run_id != execution.run_id:
+            raise ValueError("Agent task and execution belong to different runs")
+        dependencies = json.loads(task.depends_on_json)
+        if any(self._require_agent_task(item).status != "completed" for item in dependencies):
+            raise ValueError("Agent task dependencies are not completed")
+        task.execution_id = execution_id
+        task.status = "running"
+        task.started_at = utc_now()
+        self._flush_refresh_and_commit(task)
+        return task
+
+    def finish_agent_task(
+        self, task_id: str, status: str, *, result_json: str | None = None
+    ) -> AgentTaskRecord:
+        if status not in {"completed", "failed", "cancelled", "skipped"}:
+            raise ValueError("Agent task status must be terminal")
+        task = self._require_agent_task(task_id)
+        task.status = status
+        task.result_json = result_json
+        task.finished_at = utc_now()
+        self._flush_refresh_and_commit(task)
+        return task
 
     def start_agent_execution(
         self,
@@ -280,8 +364,19 @@ class RunRepository:
                 .order_by(MessageRecord.created_at.asc(), MessageRecord.id.asc())
             )
         )
+        execution_by_tool_call = dict(
+            self.db.execute(
+                select(
+                    AgentToolCallRecord.tool_call_id,
+                    AgentToolCallRecord.agent_execution_id,
+                ).join(
+                    ToolCallRecord,
+                    AgentToolCallRecord.tool_call_id == ToolCallRecord.id,
+                ).where(ToolCallRecord.run_id == run_id)
+            ).all()
+        )
         tool_calls = tuple(
-            self._tool_call_detail(record)
+            self._tool_call_detail(record, execution_by_tool_call.get(record.id))
             for record in self.db.scalars(
                 select(ToolCallRecord)
                 .where(ToolCallRecord.run_id == run_id)
@@ -306,6 +401,14 @@ class RunRepository:
                 )
             )
         )
+        agent_tasks = tuple(
+            self._agent_task_detail(record)
+            for record in self.db.scalars(
+                select(AgentTaskRecord)
+                .where(AgentTaskRecord.run_id == run_id)
+                .order_by(AgentTaskRecord.created_at.asc(), AgentTaskRecord.id.asc())
+            )
+        )
         return RunDetail(
             id=run.id,
             session_id=run.session_id,
@@ -324,6 +427,7 @@ class RunRepository:
             tool_calls=tool_calls,
             file_changes=file_changes,
             agent_executions=agent_executions,
+            agent_tasks=agent_tasks,
         )
 
     def list_runs(self, session_id: str) -> tuple[RunDetail, ...]:
@@ -442,6 +546,12 @@ class RunRepository:
             raise ValueError("Agent execution not found")
         return record
 
+    def _require_agent_task(self, task_id: str) -> AgentTaskRecord:
+        record = self.db.get(AgentTaskRecord, task_id)
+        if record is None:
+            raise ValueError("Agent task not found")
+        return record
+
     def _flush_refresh_and_commit(self, record: object) -> None:
         self.db.flush()
         self.db.refresh(record)
@@ -461,7 +571,9 @@ class RunRepository:
         )
 
     @staticmethod
-    def _tool_call_detail(record: ToolCallRecord) -> ToolCallDetail:
+    def _tool_call_detail(
+        record: ToolCallRecord, agent_execution_id: str | None = None
+    ) -> ToolCallDetail:
         return ToolCallDetail(
             id=record.id,
             run_id=record.run_id,
@@ -473,6 +585,7 @@ class RunRepository:
             duration_ms=record.duration_ms,
             started_at=record.started_at,
             finished_at=record.finished_at,
+            agent_execution_id=agent_execution_id,
         )
 
     @staticmethod
@@ -499,6 +612,24 @@ class RunRepository:
             status=record.status,
             step_count=record.step_count,
             final_result_json=record.final_result_json,
+            started_at=record.started_at,
+            finished_at=record.finished_at,
+        )
+
+    @staticmethod
+    def _agent_task_detail(record: AgentTaskRecord) -> AgentTaskDetail:
+        dependencies = json.loads(record.depends_on_json)
+        return AgentTaskDetail(
+            id=record.id,
+            run_id=record.run_id,
+            execution_id=record.execution_id,
+            role=record.role,
+            description=record.description,
+            expected_output=record.expected_output,
+            depends_on=tuple(dependencies),
+            status=record.status,
+            result_json=record.result_json,
+            created_at=record.created_at,
             started_at=record.started_at,
             finished_at=record.finished_at,
         )

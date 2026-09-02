@@ -83,6 +83,7 @@ class ToolCallRead(_TimestampedRead):
     duration_ms: int | None
     started_at: datetime
     finished_at: datetime | None
+    agent_execution_id: str | None
 
 
 class FileChangeRead(_TimestampedRead):
@@ -109,6 +110,21 @@ class AgentExecutionRead(_TimestampedRead):
     finished_at: datetime | None
 
 
+class AgentTaskRead(_TimestampedRead):
+    id: str
+    run_id: str
+    execution_id: str | None
+    role: str
+    description: str
+    expected_output: str
+    depends_on: tuple[str, ...]
+    status: str
+    result_json: str | None
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+
+
 class RunRead(_TimestampedRead):
     id: str
     session_id: str
@@ -127,6 +143,7 @@ class RunRead(_TimestampedRead):
     tool_calls: tuple[ToolCallRead, ...]
     file_changes: tuple[FileChangeRead, ...]
     agent_executions: tuple[AgentExecutionRead, ...]
+    agent_tasks: tuple[AgentTaskRead, ...]
 
 
 class RunCancelRead(BaseModel):

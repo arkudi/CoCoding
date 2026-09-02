@@ -11,7 +11,11 @@ from typing import Callable, Literal
 from sqlalchemy import inspect
 
 from app.agent.events import RunEvent
-from app.agent.orchestration import SharedStepBudget, delegate_task_schema
+from app.agent.orchestration import (
+    SharedStepBudget,
+    delegate_task_schema,
+    delegate_tasks_schema,
+)
 from app.agent.provider import ModelProviderError
 from app.agent.prompts import build_system_prompt
 from app.agent.tools import ToolRegistry
@@ -71,6 +75,7 @@ class AgentLoop:
         shared_budget: SharedStepBudget | None = None,
         system_prompt: str | None = None,
         execution_id: str | None = None,
+        completion_guard: Callable[[], ToolError | None] | None = None,
     ) -> None:
         self._model = model
         self._registry = registry
@@ -83,6 +88,7 @@ class AgentLoop:
         self._shared_budget = shared_budget
         self._system_prompt = system_prompt
         self._execution_id = execution_id
+        self._completion_guard = completion_guard
         self._current_step_count = 0
 
     def run(
@@ -134,11 +140,12 @@ class AgentLoop:
         model_tools = [*self._registry.schemas(self._allowed_tools), finish_task_schema()]
         if self._delegator is not None:
             model_tools.append(delegate_task_schema())
+            model_tools.append(delegate_tasks_schema())
 
         for step_count in range(1, max_steps + 1):
             if token.is_cancelled:
                 return self._finish(run_id, self._effective_step_count(step_count - 1), "cancelled", None, _CANCELLED_ERROR)
-            if self._shared_budget is not None and not self._shared_budget.consume():
+            if self._shared_budget is not None and not self._shared_budget.consume(messages):
                 return self._finish(
                     run_id,
                     self._shared_budget.used,
@@ -176,10 +183,25 @@ class AgentLoop:
                 if token.is_cancelled:
                     return self._finish(run_id, step_count, "cancelled", None, _CANCELLED_ERROR)
                 tool_call = self._repository.start_tool_call(
-                    run_id, call.id, call.name, call.arguments_json
+                    run_id,
+                    call.id,
+                    call.name,
+                    call.arguments_json,
+                    agent_execution_id=self._execution_id,
                 )
                 self._emit("tool.started", run_id, self._record_data(tool_call))
-                if call.name == "finish_task":
+                budget_error = None
+                if self._shared_budget is not None and not self._shared_budget.consume_tool_call():
+                    budget_error = ToolResult(
+                        False,
+                        None,
+                        ToolError("SHARED_BUDGET_EXHAUSTED", self._shared_budget.last_error),
+                        0,
+                    )
+                if budget_error is not None:
+                    result = budget_error
+                    completion = None
+                elif call.name == "finish_task":
                     if len(turn.tool_calls) != 1:
                         result = ToolResult(
                             False,
@@ -190,6 +212,11 @@ class AgentLoop:
                             ),
                             0,
                         )
+                        completion = None
+                    elif self._completion_guard is not None and (
+                        guard_error := self._completion_guard()
+                    ) is not None:
+                        result = ToolResult(False, None, guard_error, 0)
                         completion = None
                     else:
                         verification = CompletionVerifier(
@@ -209,7 +236,7 @@ class AgentLoop:
                             0,
                         )
                         completion = verification.completion
-                elif call.name == "delegate_task" and self._delegator is not None:
+                elif call.name in {"delegate_task", "delegate_tasks"} and self._delegator is not None:
                     result = self._delegator(call)
                     completion = None
                 else:

@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     agent_multi_agent_enabled: bool = True
     agent_max_delegations: int = Field(default=3, ge=1, le=10)
     agent_child_step_limit: int = Field(default=10, ge=1, le=50)
+    agent_token_budget: int = Field(default=200_000, ge=1_000, le=10_000_000)
+    agent_tool_call_limit: int = Field(default=200, ge=1, le=2_000)
+    agent_wall_clock_limit_seconds: int = Field(default=900, ge=10, le=7_200)
     agent_require_code_verification: bool = True
     agent_allow_unverified_code_with_reason: bool = True
     agent_require_resolved_test_failures: bool = True

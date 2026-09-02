@@ -21,7 +21,7 @@
       "expect": {
         "status": "completed",
         "files_equal": {"greeting.txt": "hello world\n"},
-        "required_agent_roles": ["manager", "implementer"],
+        "required_agent_roles": ["manager", "implementer", "reviewer"],
         "max_tool_failures": 0,
         "max_steps": 14
       }

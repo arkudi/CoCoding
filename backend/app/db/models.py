@@ -81,6 +81,31 @@ class AgentExecutionRecord(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class AgentTaskRecord(Base):
+    __tablename__ = "agent_tasks"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'running', 'completed', 'failed', 'cancelled', 'skipped')",
+            name="agent_task_status_is_valid",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id"), index=True)
+    execution_id: Mapped[str | None] = mapped_column(
+        ForeignKey("agent_executions.id"), nullable=True, index=True
+    )
+    role: Mapped[str] = mapped_column(String(30), index=True)
+    description: Mapped[str] = mapped_column(Text)
+    expected_output: Mapped[str] = mapped_column(Text)
+    depends_on_json: Mapped[str] = mapped_column(Text, default="[]")
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    result_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class MessageRecord(Base):
     __tablename__ = "messages"
 
@@ -107,6 +132,17 @@ class ToolCallRecord(Base):
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AgentToolCallRecord(Base):
+    __tablename__ = "agent_tool_calls"
+
+    tool_call_id: Mapped[str] = mapped_column(
+        ForeignKey("tool_calls.id"), primary_key=True
+    )
+    agent_execution_id: Mapped[str] = mapped_column(
+        ForeignKey("agent_executions.id"), index=True
+    )
 
 
 class FileChangeRecord(Base):

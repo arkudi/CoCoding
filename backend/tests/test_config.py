@@ -17,6 +17,9 @@ def test_deepseek_settings_use_documented_unprefixed_environment_names(
     assert settings.agent_multi_agent_enabled is True
     assert settings.agent_max_delegations == 3
     assert settings.agent_child_step_limit == 10
+    assert settings.agent_token_budget == 200_000
+    assert settings.agent_tool_call_limit == 200
+    assert settings.agent_wall_clock_limit_seconds == 900
     assert settings.agent_require_code_verification is True
     assert settings.agent_allow_unverified_code_with_reason is True
     assert settings.agent_require_resolved_test_failures is True

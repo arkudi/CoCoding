@@ -1,8 +1,12 @@
 <script setup lang="ts">
 import ToolCallCard from './ToolCallCard.vue'
-import type { ToolCall } from '@/types/run'
+import type { AgentExecution, ToolCall } from '@/types/run'
 
-defineProps<{ calls: ToolCall[] }>()
+const props = defineProps<{ calls: ToolCall[], executions: AgentExecution[] }>()
+
+function roleFor(call: ToolCall) {
+  return props.executions.find(item => item.id === call.agent_execution_id)?.role
+}
 </script>
 
 <template>
@@ -13,7 +17,9 @@ defineProps<{ calls: ToolCall[] }>()
       <span class="tool-chain-hint">点击展开</span>
     </summary>
     <div class="tool-chain-calls">
-      <ToolCallCard v-for="call in calls" :key="call.id" :call="call" />
+      <ToolCallCard
+        v-for="call in calls" :key="call.id" :call="call" :agent-role="roleFor(call)"
+      />
     </div>
   </details>
 </template>

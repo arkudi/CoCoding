@@ -7,7 +7,7 @@ from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.agent.orchestration import ROLE_TOOLS
+from app.agent.orchestration import ROLE_TOOLS, SharedStepBudget
 from app.agent.service import AgentService
 from app.agent.types import AssistantTurn, ToolCall
 from app.db.database import create_schema
@@ -24,6 +24,7 @@ def finish_subtask(
     call_id: str,
     *,
     changed_files: list[str] | None = None,
+    verdict: str | None = None,
 ) -> AssistantTurn:
     return call(
         "finish_subtask",
@@ -34,6 +35,7 @@ def finish_subtask(
             "changed_files": changed_files or [],
             "tests": [],
             "unresolved_issues": [],
+            "verdict": verdict,
         },
         call_id,
     )
@@ -84,7 +86,7 @@ def test_manager_runs_specialized_workers_serially_with_one_shared_budget(tmp_pa
             ),
             delegate("reviewer", "Review note.txt.", "manager-review"),
             call("read_file", {"path": "note.txt"}, "reviewer-read"),
-            finish_subtask("The file is correct.", "reviewer-finish"),
+            finish_subtask("The file is correct.", "reviewer-finish", verdict="approved"),
             finish("Implemented and reviewed.", changed_files=["note.txt"]),
         ]
     )
@@ -104,6 +106,10 @@ def test_manager_runs_specialized_workers_serially_with_one_shared_budget(tmp_pa
         "reviewer",
     ]
     assert all(execution.status == "completed" for execution in detail.agent_executions)
+    assert all(tool.agent_execution_id is not None for tool in detail.tool_calls)
+    assert [task.role for task in detail.agent_tasks] == [
+        "explorer", "implementer", "reviewer",
+    ]
     manager_tool_names = {
         tool["function"]["name"] for tool in model.calls[0]["tools"]
     }
@@ -146,3 +152,118 @@ def test_only_implementer_role_has_write_permissions() -> None:
     assert write_tools <= ROLE_TOOLS["implementer"]
     assert write_tools.isdisjoint(ROLE_TOOLS["explorer"])
     assert write_tools.isdisjoint(ROLE_TOOLS["reviewer"])
+
+
+def test_finish_is_rejected_until_latest_implementation_is_reviewed(tmp_path: Path) -> None:
+    model = ScriptedModelClient(
+        [
+            delegate("implementer", "Create note.txt.", "delegate-implementer"),
+            call("write_file", {"path": "note.txt", "content": "done"}, "write"),
+            finish_subtask("Created it.", "implementer-finish", changed_files=["note.txt"]),
+            finish("Premature.", changed_files=["note.txt"], call_id="early-finish"),
+            delegate("reviewer", "Review note.txt.", "delegate-reviewer"),
+            call("read_file", {"path": "note.txt"}, "review-read"),
+            finish_subtask("Approved.", "reviewer-finish", verdict="approved"),
+            finish("Reviewed and complete.", changed_files=["note.txt"], call_id="final-finish"),
+        ]
+    )
+    engine, service, session_id = service_context(tmp_path, model)
+    try:
+        detail = service.execute(session_id, "Create note.txt", max_steps=20)
+    finally:
+        engine.dispose()
+
+    assert detail.status == "completed"
+    early = next(tool for tool in detail.tool_calls if tool.provider_call_id == "early-finish")
+    assert early.status == "failed"
+    assert "REVIEW_REQUIRED" in (early.result_json or "")
+
+
+def test_shared_budget_enforces_tokens_tools_and_delegations() -> None:
+    token_budget = SharedStepBudget(10, token_limit=1)
+    tool_budget = SharedStepBudget(10, tool_call_limit=1)
+    delegation_budget = SharedStepBudget(10, delegation_limit=1)
+
+    assert token_budget.consume([{"role": "user", "content": "12345678"}]) is False
+    assert "token" in token_budget.last_error
+    assert tool_budget.consume_tool_call() is True
+    assert tool_budget.consume_tool_call() is False
+    assert "tool-call" in tool_budget.last_error
+    assert delegation_budget.consume_delegation() is True
+    assert delegation_budget.consume_delegation() is False
+    assert "delegation" in delegation_budget.last_error
+
+
+def test_independent_read_only_workers_run_concurrently(tmp_path: Path) -> None:
+    class ParallelModel:
+        def __init__(self) -> None:
+            self._manager_calls = 0
+            self._lock = threading.Lock()
+            self._barrier = threading.Barrier(2)
+            self.active = 0
+            self.max_active = 0
+
+        def complete(self, messages, tools, on_text_delta=None):
+            system = str(messages[0]["content"])
+            if "bounded explorer worker" in system:
+                with self._lock:
+                    self.active += 1
+                    self.max_active = max(self.max_active, self.active)
+                self._barrier.wait(timeout=3)
+                with self._lock:
+                    self.active -= 1
+                task = str(messages[1]["content"])
+                return finish_subtask(f"Completed {task}", f"finish-{threading.get_ident()}")
+            with self._lock:
+                self._manager_calls += 1
+                manager_call = self._manager_calls
+            if manager_call == 1:
+                return call(
+                    "delegate_tasks",
+                    {
+                        "tasks": [
+                            {"role": "explorer", "task": "Inspect A", "expected_output": "A"},
+                            {"role": "explorer", "task": "Inspect B", "expected_output": "B"},
+                        ]
+                    },
+                    "parallel-delegate",
+                )
+            return finish("Parallel inspection complete.")
+
+    model = ParallelModel()
+    engine, service, session_id = service_context(tmp_path, model)  # type: ignore[arg-type]
+    try:
+        detail = service.execute(session_id, "Inspect two areas", max_steps=10)
+    finally:
+        engine.dispose()
+
+    assert detail.status == "completed"
+    assert model.max_active == 2
+    assert [execution.role for execution in detail.agent_executions] == [
+        "manager", "explorer", "explorer",
+    ]
+    assert all(task.status == "completed" for task in detail.agent_tasks)
+
+
+def test_reviewer_cannot_approve_without_inspecting_evidence(tmp_path: Path) -> None:
+    model = ScriptedModelClient(
+        [
+            delegate("reviewer", "Review the workspace.", "delegate-reviewer"),
+            finish_subtask("Looks fine.", "empty-review", verdict="approved"),
+            call("get_diff", {}, "review-diff"),
+            finish_subtask("Evidence reviewed.", "review-finish", verdict="approved"),
+            finish("Review complete."),
+        ]
+    )
+    engine, service, session_id = service_context(tmp_path, model)
+    try:
+        detail = service.execute(session_id, "Review", max_steps=10)
+    finally:
+        engine.dispose()
+
+    assert detail.status == "completed"
+    rejected = next(
+        tool for tool in detail.tool_calls if tool.provider_call_id == "empty-review"
+    )
+    assert rejected.status == "failed"
+    assert "REVIEW_EVIDENCE_REQUIRED" in (rejected.result_json or "")

@@ -19,11 +19,17 @@ test('renders parent and worker state with the worker summary', () => {
       final_result_json: JSON.stringify({ result: { summary: 'Changed the target file.' } }),
       finished_at: '2026-09-02T00:00:03Z',
     },
-  ] } })
+  ], tasks: [{
+    id: 'task-1', run_id: 'run-1', execution_id: 'worker-1', role: 'implementer',
+    description: 'Implement the change', expected_output: 'A patch', depends_on: [],
+    status: 'completed', result_json: null, started_at: manager.started_at,
+    created_at: manager.started_at, finished_at: '2026-09-02T00:00:03Z',
+  }] } })
 
   expect(screen.getByRole('region', { name: '智能体协作' })).toBeTruthy()
   expect(screen.getByText('Manager')).toBeTruthy()
-  expect(screen.getByText('Implementer')).toBeTruthy()
+  expect(screen.getAllByText('Implementer')).toHaveLength(2)
   expect(screen.getByText('Changed the target file.')).toBeTruthy()
   expect(screen.getByText('3 步')).toBeTruthy()
+  expect(screen.getByText('Task DAG')).toBeTruthy()
 })
