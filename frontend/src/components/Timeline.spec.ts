@@ -126,8 +126,8 @@ test('keeps following the conversation when a new run is appended at the bottom'
     title: 'Demo', history: [completed], selected: completed, draft: '', streaming: false,
     cancelling: false, error: null,
   } })
-  const timeline = screen.getByRole('main', { name: '执行过程' })
-  Object.defineProperties(timeline, {
+  const conversation = screen.getByRole('region', { name: '对话记录' })
+  Object.defineProperties(conversation, {
     scrollHeight: { configurable: true, value: 1000 },
     clientHeight: { configurable: true, value: 400 },
     scrollTop: { configurable: true, value: 600, writable: true },
@@ -145,7 +145,7 @@ test('keeps following the conversation when a new run is appended at the bottom'
     cancelling: false, error: null,
   })
 
-  await waitFor(() => expect(timeline.scrollTop).toBe(1000))
+  await waitFor(() => expect(conversation.scrollTop).toBe(1000))
 })
 
 test('does not pull the reader away from earlier messages after they scroll up', async () => {
@@ -153,13 +153,13 @@ test('does not pull the reader away from earlier messages after they scroll up',
     title: 'Demo', history: [running], selected: running, draft: 'Beginning', streaming: true,
     cancelling: false, error: null,
   } })
-  const timeline = screen.getByRole('main', { name: '执行过程' })
-  Object.defineProperties(timeline, {
+  const conversation = screen.getByRole('region', { name: '对话记录' })
+  Object.defineProperties(conversation, {
     scrollHeight: { configurable: true, value: 1000 },
     clientHeight: { configurable: true, value: 400 },
     scrollTop: { configurable: true, value: 100, writable: true },
   })
-  await fireEvent.scroll(timeline)
+  await fireEvent.scroll(conversation)
 
   await view.rerender({
     title: 'Demo', history: [running], selected: running,
@@ -168,7 +168,7 @@ test('does not pull the reader away from earlier messages after they scroll up',
 
   await nextTick()
   await nextTick()
-  expect(timeline.scrollTop).toBe(100)
+  expect(conversation.scrollTop).toBe(100)
 })
 
 test('opens a different session at its latest conversation', async () => {
@@ -176,13 +176,13 @@ test('opens a different session at its latest conversation', async () => {
     sessionId: 'session-a', title: 'Task A', history: [running], selected: running,
     draft: 'Beginning', streaming: true, cancelling: false, error: null,
   } })
-  const timeline = screen.getByRole('main', { name: '执行过程' })
-  Object.defineProperties(timeline, {
+  const conversation = screen.getByRole('region', { name: '对话记录' })
+  Object.defineProperties(conversation, {
     scrollHeight: { configurable: true, value: 1000 },
     clientHeight: { configurable: true, value: 400 },
     scrollTop: { configurable: true, value: 100, writable: true },
   })
-  await fireEvent.scroll(timeline)
+  await fireEvent.scroll(conversation)
 
   await view.rerender({
     sessionId: 'session-b', title: 'Task B', history: [completed], selected: completed,
@@ -191,5 +191,20 @@ test('opens a different session at its latest conversation', async () => {
 
   await nextTick()
   await nextTick()
-  expect(timeline.scrollTop).toBe(1000)
+  expect(conversation.scrollTop).toBe(1000)
+})
+
+test('keeps the composer outside the conversation scroller in the same aligned shell', () => {
+  render(Timeline, { props: {
+    sessionId: 'session-1', title: 'Demo', history: [completed], selected: completed,
+    draft: '', streaming: false, cancelling: false, error: null,
+  } })
+
+  const conversation = screen.getByRole('region', { name: '对话记录' })
+  const composer = screen.getByRole('textbox', { name: '任务描述' }).closest('form')
+  expect(composer).not.toBeNull()
+  expect(conversation.contains(composer)).toBe(false)
+  expect(composer?.parentElement).toBe(conversation.parentElement)
+  expect(conversation.compareDocumentPosition(composer as Node) & Node.DOCUMENT_POSITION_FOLLOWING)
+    .toBeTruthy()
 })
