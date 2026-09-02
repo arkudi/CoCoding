@@ -1,10 +1,10 @@
 from collections.abc import Iterator
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
-from app.db.repositories import SessionRepository
+from app.db.repositories import SessionHasActiveRunError, SessionRepository
 from app.directory_picker import DirectoryPickerUnavailableError
 from app.schemas import DirectorySelectionRead, SessionCreate, SessionRead
 
@@ -39,3 +39,17 @@ def create_session(payload: SessionCreate, db: Session = Depends(get_db)) -> Ses
 @router.get("", response_model=list[SessionRead])
 def list_sessions(db: Session = Depends(get_db)) -> list[SessionRead]:
     return [SessionRead.model_validate(item) for item in SessionRepository(db).list()]
+
+
+@router.delete("/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_session(session_id: str, db: Session = Depends(get_db)) -> Response:
+    try:
+        deleted = SessionRepository(db).delete(session_id)
+    except SessionHasActiveRunError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="正在执行的任务不能删除，请先取消任务",
+        ) from error
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
