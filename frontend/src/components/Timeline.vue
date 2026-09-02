@@ -28,7 +28,7 @@ const chronologicalHistory = computed(() => [...props.history].sort((left, right
   const difference = new Date(left.created_at).getTime() - new Date(right.created_at).getTime()
   return difference || left.id.localeCompare(right.id)
 }))
-const timelineElement = ref<HTMLElement | null>(null)
+const conversationElement = ref<HTMLElement | null>(null)
 const followsLatest = ref(true)
 const conversationRevision = computed(() => props.history
   .map(run => `${run.id}:${run.tool_calls.length}:${run.final_response?.length ?? -1}:${run.error_text ?? ''}`)
@@ -36,19 +36,21 @@ const conversationRevision = computed(() => props.history
 
 watch([conversationRevision, () => props.draft], async () => {
   await nextTick()
-  if (timelineElement.value && followsLatest.value) {
-    timelineElement.value.scrollTop = timelineElement.value.scrollHeight
+  if (conversationElement.value && followsLatest.value) {
+    conversationElement.value.scrollTop = conversationElement.value.scrollHeight
   }
 })
 
 watch(() => props.sessionId, async () => {
   followsLatest.value = true
   await nextTick()
-  if (timelineElement.value) timelineElement.value.scrollTop = timelineElement.value.scrollHeight
+  if (conversationElement.value) {
+    conversationElement.value.scrollTop = conversationElement.value.scrollHeight
+  }
 })
 
 function updateFollowState() {
-  const element = timelineElement.value
+  const element = conversationElement.value
   if (!element) return
   followsLatest.value = element.scrollHeight - element.scrollTop - element.clientHeight <= 80
 }
@@ -64,7 +66,7 @@ function isStreaming(run: Run) {
 </script>
 
 <template>
-  <main ref="timelineElement" class="timeline" aria-label="执行过程" @scroll="updateFollowState">
+  <main class="timeline" aria-label="执行过程">
     <div v-if="!title" class="empty-state">
       <span class="eyebrow">LOCAL CODING AGENT</span>
       <h1>准备开始</h1>
@@ -75,7 +77,13 @@ function isStreaming(run: Run) {
         <div><span class="eyebrow">LOCAL AGENT SESSION</span><h1>{{ title }}</h1></div>
         <span v-if="selected" class="run-status" :data-status="selected.status">{{ statusCopy[selected.status] }}</span>
       </header>
-      <section v-if="chronologicalHistory.length" class="conversation-feed" aria-live="polite">
+      <section
+        ref="conversationElement"
+        class="conversation-feed"
+        aria-label="对话记录"
+        aria-live="polite"
+        @scroll="updateFollowState"
+      >
         <section v-for="run in chronologicalHistory" :key="run.id" class="conversation-turn">
           <article class="message user-message"><span>你</span><p>{{ run.prompt }}</p></article>
           <ToolChain v-if="run.tool_calls.length" :calls="run.tool_calls" />
