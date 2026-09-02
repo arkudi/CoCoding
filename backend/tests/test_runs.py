@@ -65,7 +65,7 @@ def test_submit_run_and_reload_complete_evidence(app_factory, tmp_path: Path) ->
 
     assert evidence["prompt"] == "update it"
     assert evidence["status"] == "completed"
-    assert evidence["max_steps"] == 50
+    assert evidence["max_steps"] == 100
     assert evidence["final_response"] == "Updated a.txt."
     assert evidence["step_count"] == 2
     assert evidence["messages"][0]["role"] == "user"
