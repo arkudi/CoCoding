@@ -112,6 +112,7 @@ export type RunEventType =
   | 'task.created'
   | 'task.started'
   | 'task.finished'
+  | 'session.renamed'
   | 'message.created'
   | 'tool.started'
   | 'tool.finished'

@@ -1,6 +1,7 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { useRunsStore } from './runs'
+import { useSessionsStore } from './sessions'
 import type { Run, RunEvent } from '@/types/run'
 
 const api = vi.hoisted(() => ({
@@ -196,6 +197,21 @@ test('upserts live agent execution state', async () => {
   expect(store.selected?.agent_executions).toHaveLength(1)
   expect(store.selected?.agent_executions[0].status).toBe('completed')
   expect(store.selected?.agent_executions[0].step_count).toBe(2)
+})
+
+test('applies an agent-generated session title event', async () => {
+  api.createRun.mockResolvedValue(running)
+  const sessions = useSessionsStore()
+  sessions.items = [{
+    id: 'session-1', title: '新任务 · demo', workspace_path: 'F:/demo', status: 'idle',
+    created_at: running.created_at, updated_at: running.updated_at,
+  }]
+  const store = useRunsStore()
+  await store.submit('session-1', { prompt: 'inspect' })
+
+  handlers.onEvent(event('session.renamed', { id: 'session-1', title: '检查项目结构' }))
+
+  expect(sessions.items[0].title).toBe('检查项目结构')
 })
 
 test('upserts live task graph state', async () => {

@@ -47,6 +47,21 @@ def test_complete_streams_visible_content_and_reconstructs_turn():
     assert turn == AssistantTurn("Hello world")
 
 
+def test_complete_omits_tool_parameters_for_title_generation() -> None:
+    captured = {}
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(
+        create=lambda **kwargs: captured.update(kwargs) or iter([_content_chunk("Title")])
+    )))
+
+    turn = DeepSeekClient(client, "deepseek-v4-flash").complete(
+        [{"role": "user", "content": "title this"}], []
+    )
+
+    assert turn.content == "Title"
+    assert "tools" not in captured
+    assert "tool_choice" not in captured
+
+
 def test_complete_reconstructs_tools_without_emitting_reasoning():
     """Replacing assembly with only the last fragment must fail this test."""
     stream = iter(

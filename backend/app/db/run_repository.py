@@ -454,6 +454,13 @@ class RunRepository:
         self._flush_refresh_and_commit(record)
         return record
 
+    def set_session_title(self, session_id: str, title: str) -> SessionRecord:
+        record = self._require_session(session_id)
+        record.title = title
+        record.updated_at = utc_now()
+        self._flush_refresh_and_commit(record)
+        return record
+
     def interrupt_run(self, run_id: str, error_text: str) -> RunRecord:
         record = self._require_run(run_id)
         if record.status != "running":
