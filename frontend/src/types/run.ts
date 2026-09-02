@@ -73,6 +73,7 @@ export interface AgentTask {
 export interface Run {
   id: string
   session_id: string
+  session_title: string
   prompt: string
   model: string
   prompt_version: string

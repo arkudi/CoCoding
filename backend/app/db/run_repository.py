@@ -102,6 +102,7 @@ class AgentTaskDetail:
 class RunDetail:
     id: str
     session_id: str
+    session_title: str
     prompt: str
     model: str
     prompt_version: str
@@ -356,6 +357,7 @@ class RunRepository:
         run = self.db.get(RunRecord, run_id)
         if run is None:
             return None
+        session = self._require_session(run.session_id)
         messages = tuple(
             self._message_detail(record)
             for record in self.db.scalars(
@@ -412,6 +414,7 @@ class RunRepository:
         return RunDetail(
             id=run.id,
             session_id=run.session_id,
+            session_title=session.title,
             prompt=run.prompt,
             model=run.model,
             prompt_version=run.prompt_version,

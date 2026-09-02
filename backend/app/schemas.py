@@ -134,6 +134,7 @@ class AgentTaskRead(_TimestampedRead):
 class RunRead(_TimestampedRead):
     id: str
     session_id: str
+    session_title: str
     prompt: str
     model: str
     prompt_version: str

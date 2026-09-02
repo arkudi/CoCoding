@@ -164,6 +164,7 @@ export const useRunsStore = defineStore('runs', {
     replaceRun(run: Run, clearDraft = true) {
       if (clearDraft) delete this.draft_by_run[run.id]
       this.details[run.id] = run
+      useSessionsStore().rename(run.session_id, run.session_title)
       this.history_by_session[run.session_id] = upsert(
         this.history_by_session[run.session_id] ?? [], run,
       )

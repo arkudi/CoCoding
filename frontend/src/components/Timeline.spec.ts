@@ -6,7 +6,7 @@ import Timeline from './Timeline.vue'
 import type { Run } from '@/types/run'
 
 const running: Run = {
-  id: 'run-running', session_id: 'session-1', prompt: 'Inspect the project', model: 'fake',
+  id: 'run-running', session_id: 'session-1', session_title: 'Demo', prompt: 'Inspect the project', model: 'fake',
   prompt_version: 'v1', status: 'running', max_steps: 20, step_count: 1,
   final_response: null, error_text: null,
   created_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-01T00:00:01Z',
@@ -14,7 +14,7 @@ const running: Run = {
 }
 
 const completed: Run = {
-  id: 'run-completed', session_id: 'session-1', prompt: 'Inspect the project', model: 'fake',
+  id: 'run-completed', session_id: 'session-1', session_title: 'Demo', prompt: 'Inspect the project', model: 'fake',
   prompt_version: 'v1', status: 'completed', max_steps: 20, step_count: 1,
   final_response: 'Saved answer', error_text: null,
   created_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-01T00:00:01Z',
@@ -22,7 +22,7 @@ const completed: Run = {
 }
 
 const completedWithEmptyResponse: Run = {
-  id: 'run-empty-completed', session_id: 'session-1', prompt: 'Inspect the project', model: 'fake',
+  id: 'run-empty-completed', session_id: 'session-1', session_title: 'Demo', prompt: 'Inspect the project', model: 'fake',
   prompt_version: 'v1', status: 'completed', max_steps: 20, step_count: 1,
   final_response: '', error_text: null,
   created_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-01T00:00:01Z',
@@ -31,7 +31,7 @@ const completedWithEmptyResponse: Run = {
 
 test('renders task evidence and final response', () => {
   const run: Run = {
-    id: 'run-1', session_id: 'session-1', prompt: 'Inspect the project', model: 'fake',
+    id: 'run-1', session_id: 'session-1', session_title: 'Demo', prompt: 'Inspect the project', model: 'fake',
     prompt_version: 'v1', status: 'completed', max_steps: 20, step_count: 1,
     final_response: 'Everything is ready.', error_text: null,
     created_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-01T00:00:01Z',
