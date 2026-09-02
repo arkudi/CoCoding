@@ -28,6 +28,7 @@ export interface ToolCall {
   duration_ms: number | null
   started_at: string
   finished_at: string | null
+  agent_execution_id?: string | null
 }
 
 export interface FileChange {
@@ -54,6 +55,21 @@ export interface AgentExecution {
   finished_at: string | null
 }
 
+export interface AgentTask {
+  id: string
+  run_id: string
+  execution_id: string | null
+  role: AgentExecution['role']
+  description: string
+  expected_output: string
+  depends_on: string[]
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'skipped'
+  result_json: string | null
+  created_at: string
+  started_at: string | null
+  finished_at: string | null
+}
+
 export interface Run {
   id: string
   session_id: string
@@ -72,6 +88,7 @@ export interface Run {
   tool_calls: ToolCall[]
   file_changes: FileChange[]
   agent_executions: AgentExecution[]
+  agent_tasks: AgentTask[]
 }
 
 export interface RunCreate {
@@ -92,6 +109,9 @@ export type RunEventType =
   | 'assistant.finished'
   | 'agent.started'
   | 'agent.finished'
+  | 'task.created'
+  | 'task.started'
+  | 'task.finished'
   | 'message.created'
   | 'tool.started'
   | 'tool.finished'

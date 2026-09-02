@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import * as api from '@/api/runs'
 import { useSessionsStore } from './sessions'
 import type {
-  AgentExecution, AssistantDeltaData, AssistantDraft, FileChange, Run, RunCreate, RunEvent,
+  AgentExecution, AgentTask, AssistantDeltaData, AssistantDraft, FileChange, Run, RunCreate, RunEvent,
   RunMessage, RunStatus, ToolCall,
 } from '@/types/run'
 
@@ -123,6 +123,8 @@ export const useRunsStore = defineStore('runs', {
         run.messages = upsert(run.messages, event.data as RunMessage)
       } else if (event.type === 'agent.started' || event.type === 'agent.finished') {
         run.agent_executions = upsert(run.agent_executions, event.data as AgentExecution)
+      } else if (event.type === 'task.created' || event.type === 'task.started' || event.type === 'task.finished') {
+        run.agent_tasks = upsert(run.agent_tasks, event.data as AgentTask)
       } else if (event.type === 'tool.started' || event.type === 'tool.finished') {
         run.tool_calls = upsert(run.tool_calls, event.data as ToolCall)
       } else if (event.type === 'files.changed') {

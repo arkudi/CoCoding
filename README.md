@@ -78,12 +78,18 @@ curl.exe -sS -X POST "http://127.0.0.1:8000/api/sessions/$($session.id)/runs" `
 The returned Run initially has status `running`. Follow `ws://127.0.0.1:8000/api/runs/{run_id}/events`, or query `GET /api/runs/{run_id}`. Run history is available from `GET /api/sessions/{session_id}/runs`.
 
 Multi-agent orchestration is enabled by default. A read-only Manager can delegate
-serial, bounded subtasks to an Explorer, an Implementer, or a Reviewer. Only the
-Implementer receives write and general command tools. All model calls share the
-Run's hard turn budget, and delegation is limited to three workers by default.
-Parent/child execution records are persisted and shown live in the Agent Team trace.
+bounded subtasks to an Explorer, an Implementer, or an independent Reviewer. Only
+the Implementer receives write and general command tools. Independent Explorer and
+Reviewer tasks can be batched in parallel; parallel Reviewers do not receive the
+potentially mutating test runner, and Implementers remain serial. Every implementation
+must receive an explicit Reviewer approval before completion. Parent/child executions,
+Task DAG dependencies, and per-Agent tool ownership are persisted and shown live.
+All agents share limits for model turns, estimated input tokens, tool calls,
+delegations, and wall-clock duration.
 Configure this with `COCODING_AGENT_MULTI_AGENT_ENABLED`,
-`COCODING_AGENT_MAX_DELEGATIONS`, and `COCODING_AGENT_CHILD_STEP_LIMIT`.
+`COCODING_AGENT_MAX_DELEGATIONS`, `COCODING_AGENT_CHILD_STEP_LIMIT`,
+`COCODING_AGENT_TOKEN_BUDGET`, `COCODING_AGENT_TOOL_CALL_LIMIT`, and
+`COCODING_AGENT_WALL_CLOCK_LIMIT_SECONDS`.
 
 The model submits a structured `finish_task` call containing its summary, changed files,
 tests, and unresolved issues. The runtime verifies file claims against a full workspace

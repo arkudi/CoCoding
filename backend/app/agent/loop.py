@@ -11,7 +11,11 @@ from typing import Callable, Literal
 from sqlalchemy import inspect
 
 from app.agent.events import RunEvent
-from app.agent.orchestration import SharedStepBudget, delegate_task_schema
+from app.agent.orchestration import (
+    SharedStepBudget,
+    delegate_task_schema,
+    delegate_tasks_schema,
+)
 from app.agent.provider import ModelProviderError
 from app.agent.prompts import build_system_prompt
 from app.agent.tools import ToolRegistry
@@ -136,6 +140,7 @@ class AgentLoop:
         model_tools = [*self._registry.schemas(self._allowed_tools), finish_task_schema()]
         if self._delegator is not None:
             model_tools.append(delegate_task_schema())
+            model_tools.append(delegate_tasks_schema())
 
         for step_count in range(1, max_steps + 1):
             if token.is_cancelled:
@@ -231,7 +236,7 @@ class AgentLoop:
                             0,
                         )
                         completion = verification.completion
-                elif call.name == "delegate_task" and self._delegator is not None:
+                elif call.name in {"delegate_task", "delegate_tasks"} and self._delegator is not None:
                     result = self._delegator(call)
                     completion = None
                 else:

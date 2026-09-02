@@ -191,3 +191,54 @@ def test_shared_budget_enforces_tokens_tools_and_delegations() -> None:
     assert delegation_budget.consume_delegation() is True
     assert delegation_budget.consume_delegation() is False
     assert "delegation" in delegation_budget.last_error
+
+
+def test_independent_read_only_workers_run_concurrently(tmp_path: Path) -> None:
+    class ParallelModel:
+        def __init__(self) -> None:
+            self._manager_calls = 0
+            self._lock = threading.Lock()
+            self._barrier = threading.Barrier(2)
+            self.active = 0
+            self.max_active = 0
+
+        def complete(self, messages, tools, on_text_delta=None):
+            system = str(messages[0]["content"])
+            if "bounded explorer worker" in system:
+                with self._lock:
+                    self.active += 1
+                    self.max_active = max(self.max_active, self.active)
+                self._barrier.wait(timeout=3)
+                with self._lock:
+                    self.active -= 1
+                task = str(messages[1]["content"])
+                return finish_subtask(f"Completed {task}", f"finish-{threading.get_ident()}")
+            with self._lock:
+                self._manager_calls += 1
+                manager_call = self._manager_calls
+            if manager_call == 1:
+                return call(
+                    "delegate_tasks",
+                    {
+                        "tasks": [
+                            {"role": "explorer", "task": "Inspect A", "expected_output": "A"},
+                            {"role": "explorer", "task": "Inspect B", "expected_output": "B"},
+                        ]
+                    },
+                    "parallel-delegate",
+                )
+            return finish("Parallel inspection complete.")
+
+    model = ParallelModel()
+    engine, service, session_id = service_context(tmp_path, model)  # type: ignore[arg-type]
+    try:
+        detail = service.execute(session_id, "Inspect two areas", max_steps=10)
+    finally:
+        engine.dispose()
+
+    assert detail.status == "completed"
+    assert model.max_active == 2
+    assert [execution.role for execution in detail.agent_executions] == [
+        "manager", "explorer", "explorer",
+    ]
+    assert all(task.status == "completed" for task in detail.agent_tasks)

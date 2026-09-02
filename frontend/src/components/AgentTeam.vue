@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import type { AgentExecution } from '@/types/run'
+import type { AgentExecution, AgentTask } from '@/types/run'
 
-defineProps<{ executions: AgentExecution[] }>()
+defineProps<{ executions: AgentExecution[], tasks: AgentTask[] }>()
 
 const roleCopy: Record<AgentExecution['role'], string> = {
   manager: 'Manager',
@@ -62,6 +62,17 @@ function summary(execution: AgentExecution): string | null {
         </div>
       </li>
     </ol>
+    <div v-if="tasks.length" class="task-graph">
+      <div class="team-heading"><span>Task DAG</span><small>{{ tasks.length }} 个任务</small></div>
+      <ol>
+        <li v-for="task in tasks" :key="task.id" class="task-node">
+          <strong>{{ roleCopy[task.role] }}</strong>
+          <span :data-status="task.status">{{ task.status }}</span>
+          <small v-if="task.depends_on.length">依赖 {{ task.depends_on.length }} 项</small>
+          <p>{{ task.description }}</p>
+        </li>
+      </ol>
+    </div>
   </section>
 </template>
 
@@ -82,4 +93,8 @@ ol { list-style: none; margin: 0; padding: 6px 12px 8px; }
 .agent-meta span[data-status='failed'] { color: var(--danger); }
 .agent-node p { margin: 3px 0 0; font-size: 13px; }
 .agent-summary { display: block; margin-top: 4px; color: var(--muted); line-height: 1.4; }
+.task-graph { border-top: 1px solid var(--line); }
+.task-node { display: grid; grid-template-columns: auto auto 1fr; gap: 8px; align-items: baseline; padding: 6px 0; font-size: 12px; }
+.task-node > span, .task-node > small { color: var(--muted); }
+.task-node > p { grid-column: 1 / -1; margin: 0; }
 </style>
