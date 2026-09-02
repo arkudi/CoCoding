@@ -3,6 +3,206 @@ from types import SimpleNamespace
 import pytest
 
 from app.agent.provider import DeepSeekClient, ModelProtocolError, ModelProviderError
+from app.agent.types import AssistantTurn, ToolCall
+
+
+def _content_chunk(content):
+    delta = SimpleNamespace(content=content, tool_calls=None)
+    return SimpleNamespace(choices=[SimpleNamespace(delta=delta)])
+
+
+def _tool_chunk(index, *, call_id=None, name=None, arguments=None):
+    function = SimpleNamespace(name=name, arguments=arguments)
+    fragment = SimpleNamespace(index=index, id=call_id, function=function)
+    delta = SimpleNamespace(content=None, reasoning_content="private", tool_calls=[fragment])
+    return SimpleNamespace(choices=[SimpleNamespace(delta=delta)])
+
+
+def _client_returning(stream):
+    return SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **kwargs: stream))
+    )
+
+
+def _client_with_create(create):
+    return SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+
+
+def test_complete_streams_visible_content_and_reconstructs_turn():
+    captured = {}
+    stream = iter([_content_chunk("Hello"), _content_chunk(None), _content_chunk(" world")])
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(
+        create=lambda **kwargs: captured.update(kwargs) or stream
+    )))
+    deltas = []
+
+    turn = DeepSeekClient(client, "deepseek-v4-flash").complete(
+        [{"role": "user", "content": "hello"}],
+        [{"type": "function"}],
+        on_text_delta=deltas.append,
+    )
+
+    assert captured["stream"] is True
+    assert deltas == ["Hello", " world"]
+    assert turn == AssistantTurn("Hello world")
+
+
+def test_complete_reconstructs_tools_without_emitting_reasoning():
+    """Replacing assembly with only the last fragment must fail this test."""
+    stream = iter(
+        [
+            _tool_chunk(0, call_id="call_1", name="write_file", arguments='{"pa'),
+            _tool_chunk(0, arguments='th":"a.txt","content":"ok"}'),
+        ]
+    )
+    deltas = []
+
+    turn = DeepSeekClient(_client_returning(stream), "deepseek-v4-flash").complete(
+        [], [], on_text_delta=deltas.append
+    )
+
+    assert deltas == []
+    assert turn.tool_calls == (
+        ToolCall("call_1", "write_file", '{"path":"a.txt","content":"ok"}'),
+    )
+
+
+def test_complete_reconstructs_interleaved_tools_in_index_order():
+    """Using arrival order instead of the fragment index must fail this test."""
+    stream = iter(
+        [
+            _tool_chunk(1, call_id="call_2", name="read_", arguments='{"pa'),
+            _tool_chunk(0, call_id="call_1", name="write_", arguments='{"pa'),
+            _tool_chunk(1, name="file", arguments='th":"b.txt"}'),
+            _tool_chunk(0, name="file", arguments='th":"a.txt"}'),
+        ]
+    )
+
+    turn = DeepSeekClient(_client_returning(stream), "deepseek-v4-flash").complete([], [])
+
+    assert turn.tool_calls == (
+        ToolCall("call_1", "write_file", '{"path":"a.txt"}'),
+        ToolCall("call_2", "read_file", '{"path":"b.txt"}'),
+    )
+
+
+def test_complete_rejects_tool_stream_without_id_or_name():
+    """Returning a ToolCall for incomplete streamed metadata must fail this test."""
+    stream = iter([_tool_chunk(0, arguments='{"path":"a.txt"}')])
+
+    with pytest.raises(ModelProtocolError) as captured:
+        DeepSeekClient(_client_returning(stream), "deepseek-v4-flash").complete([], [])
+
+    assert captured.value.code == "protocol_error"
+
+
+def test_complete_rejects_tool_fragment_without_index():
+    fragment = SimpleNamespace(
+        id="call_1",
+        function=SimpleNamespace(name="read_file", arguments='{"path":"a.py"}'),
+    )
+    stream = iter([
+        SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(
+            content=None, tool_calls=[fragment],
+        ))])
+    ])
+
+    with pytest.raises(ModelProtocolError) as captured:
+        DeepSeekClient(_client_returning(stream), "deepseek-v4-flash").complete([], [])
+
+    assert captured.value.code == "protocol_error"
+    assert captured.value.safe_message == "The model provider returned an invalid response."
+
+
+@pytest.mark.parametrize(
+    "index",
+    [
+        pytest.param(-1, id="negative"),
+        pytest.param("0", id="string"),
+        pytest.param(True, id="boolean"),
+    ],
+)
+def test_complete_rejects_tool_fragment_with_invalid_index(index):
+    stream = iter([
+        _tool_chunk(
+            index,
+            call_id="call_1",
+            name="read_file",
+            arguments='{"path":"a.py"}',
+        )
+    ])
+
+    with pytest.raises(ModelProtocolError) as captured:
+        DeepSeekClient(_client_returning(stream), "deepseek-v4-flash").complete([], [])
+
+    assert captured.value.code == "protocol_error"
+    assert captured.value.safe_message == "The model provider returned an invalid response."
+
+
+def test_complete_rejects_empty_stream():
+    with pytest.raises(ModelProtocolError) as captured:
+        DeepSeekClient(
+            _client_returning(iter([])), "deepseek-v4-flash"
+        ).complete([], [])
+
+    assert captured.value.code == "protocol_error"
+    assert captured.value.safe_message == "The model provider returned an invalid response."
+
+
+def test_complete_does_not_retry_after_visible_output(monkeypatch):
+    """Retrying after delivering a visible partial response must fail this test."""
+    import app.agent.provider as provider
+
+    calls = 0
+
+    def create(**kwargs):
+        nonlocal calls
+        calls += 1
+
+        def broken_stream():
+            yield _content_chunk("partial")
+            raise _connection_error()
+
+        return broken_stream()
+
+    monkeypatch.setattr(provider.time, "sleep", lambda delay: None)
+    deltas = []
+    with pytest.raises(ModelProviderError) as captured:
+        DeepSeekClient(_client_with_create(create), "deepseek-v4-flash").complete(
+            [], [], on_text_delta=deltas.append
+        )
+
+    assert deltas == ["partial"]
+    assert calls == 1
+    assert captured.value.code == "provider_unavailable"
+
+
+def test_complete_does_not_retry_after_visible_output_on_iterator_5xx(monkeypatch):
+    """Retrying an iterator-raised 5xx after visible text must fail this test."""
+    import app.agent.provider as provider
+
+    calls = 0
+
+    def create(**kwargs):
+        nonlocal calls
+        calls += 1
+
+        def broken_stream():
+            yield _content_chunk("partial")
+            raise _server_error()
+
+        return broken_stream()
+
+    monkeypatch.setattr(provider.time, "sleep", lambda delay: None)
+    deltas = []
+    with pytest.raises(ModelProviderError) as captured:
+        DeepSeekClient(_client_with_create(create), "deepseek-v4-flash").complete(
+            [], [], on_text_delta=deltas.append
+        )
+
+    assert deltas == ["partial"]
+    assert calls == 1
+    assert captured.value.code == "provider_unavailable"
 
 
 def test_from_settings_disables_sdk_retries(monkeypatch):
@@ -35,27 +235,32 @@ def test_from_settings_disables_sdk_retries(monkeypatch):
 def test_complete_disables_thinking_and_converts_tool_calls():
     """Removing native function-tool arguments from a response must fail this test."""
     captured = {}
-    completion = SimpleNamespace(
-        choices=[
+    stream = iter(
+        [
             SimpleNamespace(
-                message=SimpleNamespace(
-                    content=None,
-                    tool_calls=[
-                        SimpleNamespace(
-                            id="call_1",
-                            function=SimpleNamespace(
-                                name="read_file", arguments='{"path":"a.py"}'
-                            ),
+                choices=[
+                    SimpleNamespace(
+                        delta=SimpleNamespace(
+                            content=None,
+                            tool_calls=[
+                                SimpleNamespace(
+                                    index=0,
+                                    id="call_1",
+                                    function=SimpleNamespace(
+                                        name="read_file", arguments='{"path":"a.py"}'
+                                    ),
+                                )
+                            ],
                         )
-                    ],
-                )
+                    )
+                ]
             )
         ]
     )
     client = SimpleNamespace(
         chat=SimpleNamespace(
             completions=SimpleNamespace(
-                create=lambda **kwargs: captured.update(kwargs) or completion
+                create=lambda **kwargs: captured.update(kwargs) or stream
             )
         )
     )
@@ -77,7 +282,7 @@ def test_complete_rejects_response_without_a_choice():
     """Silently accepting a malformed provider response must fail this test."""
     client = SimpleNamespace(
         chat=SimpleNamespace(
-            completions=SimpleNamespace(create=lambda **kwargs: SimpleNamespace(choices=[]))
+            completions=SimpleNamespace(create=lambda **kwargs: iter([SimpleNamespace(choices=[])]))
         )
     )
 

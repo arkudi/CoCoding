@@ -2,7 +2,8 @@ import { defineStore } from 'pinia'
 import * as api from '@/api/runs'
 import { useSessionsStore } from './sessions'
 import type {
-  FileChange, Run, RunCreate, RunEvent, RunMessage, RunStatus, ToolCall,
+  AssistantDeltaData, AssistantDraft, FileChange, Run, RunCreate, RunEvent,
+  RunMessage, RunStatus, ToolCall,
 } from '@/types/run'
 
 type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'retrying'
@@ -22,19 +23,25 @@ export const useRunsStore = defineStore('runs', {
   state: () => ({
     history_by_session: {} as Record<string, Run[]>,
     details: {} as Record<string, Run>,
+    draft_by_run: {} as Record<string, AssistantDraft>,
     selected_id: null as string | null,
     loading: false,
     error: null as string | null,
     connection: 'disconnected' as ConnectionState,
     cancelling: false,
     generation: 0,
+    reconciliation_revision_by_run: {} as Record<string, number>,
     reconnect_attempt: 0,
+    reconnect_exhausted: false,
     socket: null as api.RunEventConnection | null,
     reconnect_timer: null as ReturnType<typeof setTimeout> | null,
   }),
   getters: {
     selected(state): Run | null {
       return state.selected_id ? state.details[state.selected_id] ?? null : null
+    },
+    selected_draft(state): AssistantDraft | null {
+      return state.selected_id ? state.draft_by_run[state.selected_id] ?? null : null
     },
   },
   actions: {
@@ -46,7 +53,10 @@ export const useRunsStore = defineStore('runs', {
         this.history_by_session[sessionId] = items
         for (const item of items) this.details[item.id] = item
         if (items.length > 0) this.selectRun(items[0].id)
-        else this.selected_id = null
+        else {
+          this.disconnect()
+          this.selected_id = null
+        }
       } catch (error) {
         this.error = error instanceof Error ? error.message : '加载运行记录失败'
       } finally {
@@ -91,7 +101,23 @@ export const useRunsStore = defineStore('runs', {
       if (event.run_id !== this.selected_id) return
       const run = this.details[event.run_id]
       if (!run) return
-      if (event.type === 'run.snapshot') {
+      if (event.type === 'assistant.started') {
+        this.draft_by_run[event.run_id] = { text: '', active: true }
+      } else if (event.type === 'assistant.delta') {
+        const data = event.data as Partial<AssistantDeltaData> | null
+        if (!data || typeof data.delta !== 'string') {
+          this.error = '实时事件格式无效'
+          return
+        }
+        const draft = this.draft_by_run[event.run_id] ?? { text: '', active: true }
+        this.draft_by_run[event.run_id] = {
+          text: draft.text + data.delta,
+          active: true,
+        }
+      } else if (event.type === 'assistant.finished') {
+        const draft = this.draft_by_run[event.run_id]
+        if (draft) this.draft_by_run[event.run_id] = { ...draft, active: false }
+      } else if (event.type === 'run.snapshot') {
         this.replaceRun(event.data as Run)
       } else if (event.type === 'message.created') {
         run.messages = upsert(run.messages, event.data as RunMessage)
@@ -103,19 +129,31 @@ export const useRunsStore = defineStore('runs', {
         await this.reconcile(event.run_id)
       }
     },
-    async reconcile(runId: string) {
+    async reconcile(runId: string, clearDraftOnFailure = false) {
+      const revision = (this.reconciliation_revision_by_run[runId] ?? 0) + 1
+      this.reconciliation_revision_by_run[runId] = revision
       try {
         const refreshed = await api.getRun(runId)
-        this.replaceRun(refreshed)
-        if (terminal.has(refreshed.status)) {
+        if (this.reconciliation_revision_by_run[runId] !== revision) return
+        const isSelected = this.selected_id === runId
+        this.replaceRun(refreshed, isSelected)
+        if (terminal.has(refreshed.status) && isSelected) {
           this.cancelling = false
           this.disconnect()
         }
       } catch (error) {
-        this.error = error instanceof Error ? error.message : '同步运行状态失败'
+        if (this.reconciliation_revision_by_run[runId] === revision) {
+          this.error = error instanceof Error && error.message
+            ? error.message
+            : '同步运行状态失败'
+          if (clearDraftOnFailure && this.selected_id === runId) {
+            delete this.draft_by_run[runId]
+          }
+        }
       }
     },
-    replaceRun(run: Run) {
+    replaceRun(run: Run, clearDraft = true) {
+      if (clearDraft) delete this.draft_by_run[run.id]
       this.details[run.id] = run
       this.history_by_session[run.session_id] = upsert(
         this.history_by_session[run.session_id] ?? [], run,
@@ -123,8 +161,16 @@ export const useRunsStore = defineStore('runs', {
       useSessionsStore().upsertStatus(run.session_id, run.status)
     },
     scheduleReconnect(runId: string) {
-      if (this.details[runId]?.status !== 'running' || this.reconnect_attempt >= 3) {
+      if (this.details[runId]?.status !== 'running') {
         this.connection = 'disconnected'
+        return
+      }
+      if (this.reconnect_attempt >= 3) {
+        this.connection = 'disconnected'
+        if (!this.reconnect_exhausted) {
+          this.reconnect_exhausted = true
+          void this.reconcile(runId, true)
+        }
         return
       }
       const delay = [250, 500, 1000][this.reconnect_attempt++]
@@ -148,6 +194,7 @@ export const useRunsStore = defineStore('runs', {
       }
     },
     disconnect() {
+      if (this.selected_id) delete this.draft_by_run[this.selected_id]
       this.generation += 1
       if (this.reconnect_timer !== null) clearTimeout(this.reconnect_timer)
       this.reconnect_timer = null
@@ -155,6 +202,7 @@ export const useRunsStore = defineStore('runs', {
       this.socket = null
       this.connection = 'disconnected'
       this.reconnect_attempt = 0
+      this.reconnect_exhausted = false
     },
   },
 })

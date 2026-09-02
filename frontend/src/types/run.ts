@@ -74,12 +74,24 @@ export interface RunCancelResult {
 export type RunEventType =
   | 'run.snapshot'
   | 'run.started'
+  | 'assistant.started'
+  | 'assistant.delta'
+  | 'assistant.finished'
   | 'message.created'
   | 'tool.started'
   | 'tool.finished'
   | 'files.changed'
   | 'run.finished'
   | 'run.resync_required'
+
+export interface AssistantDeltaData {
+  delta: string
+}
+
+export interface AssistantDraft {
+  text: string
+  active: boolean
+}
 
 export interface RunEvent {
   type: RunEventType

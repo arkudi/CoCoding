@@ -13,7 +13,10 @@ class ScriptedModelClient:
         self.calls: list[dict[str, object]] = []
 
     def complete(
-        self, messages: list[dict[str, object]], tools: list[dict[str, object]]
+        self,
+        messages: list[dict[str, object]],
+        tools: list[dict[str, object]],
+        on_text_delta=None,
     ) -> AssistantTurn:
         self.calls.append({"messages": list(messages), "tools": tools})
         if not self._scripted_turns:
@@ -21,4 +24,6 @@ class ScriptedModelClient:
         next_turn = self._scripted_turns.popleft()
         if isinstance(next_turn, BaseException):
             raise next_turn
+        if on_text_delta is not None and next_turn.content:
+            on_text_delta(next_turn.content)
         return next_turn

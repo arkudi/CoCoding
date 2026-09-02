@@ -34,6 +34,8 @@ watch(
       :title="current?.title"
       :history="current ? runs.history_by_session[current.id] ?? [] : []"
       :selected="runs.selected"
+      :draft="runs.selected_draft?.text ?? ''"
+      :streaming="runs.selected_draft?.active ?? false"
       :cancelling="runs.cancelling"
       :error="runs.error"
       @select="runs.selectRun"

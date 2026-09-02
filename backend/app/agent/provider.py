@@ -1,5 +1,6 @@
 import logging
 import time
+from dataclasses import dataclass
 from typing import Any, Self
 
 from openai import (
@@ -13,11 +14,18 @@ from openai import (
     RateLimitError,
 )
 
-from app.agent.types import AssistantTurn, ModelClient, ToolCall
+from app.agent.types import AssistantTurn, ModelClient, TextDeltaSink, ToolCall
 
 logger = logging.getLogger(__name__)
 
 _RETRY_DELAYS = (0.25, 0.5)
+
+
+@dataclass
+class _ToolCallParts:
+    id: str = ""
+    name: str = ""
+    arguments: str = ""
 
 
 class ModelProviderError(Exception):
@@ -52,22 +60,68 @@ class DeepSeekClient(ModelClient):
         self,
         messages: list[dict[str, object]],
         tools: list[dict[str, object]],
+        on_text_delta: TextDeltaSink | None = None,
     ) -> AssistantTurn:
+        delivered_text = False
         for attempt in range(len(_RETRY_DELAYS) + 1):
             try:
-                completion = self._client.chat.completions.create(
+                stream = self._client.chat.completions.create(
                     model=self._model,
                     messages=messages,
                     tools=tools,
                     tool_choice="auto",
+                    stream=True,
                     extra_body={"thinking": {"type": "disabled"}},
                 )
-                return self._to_turn(completion)
+                parts: list[str] = []
+                tool_parts: dict[int, _ToolCallParts] = {}
+                saw_choice = False
+                for chunk in stream:
+                    if not chunk.choices:
+                        raise ModelProtocolError()
+                    saw_choice = True
+                    delta = chunk.choices[0].delta
+                    content = getattr(delta, "content", None)
+                    if content:
+                        parts.append(content)
+                        delivered_text = True
+                        if on_text_delta is not None:
+                            on_text_delta(content)
+                    for fragment in getattr(delta, "tool_calls", None) or ():
+                        index = getattr(fragment, "index", None)
+                        if (
+                            isinstance(index, bool)
+                            or not isinstance(index, int)
+                            or index < 0
+                        ):
+                            raise ModelProtocolError()
+                        current = tool_parts.setdefault(index, _ToolCallParts())
+                        if fragment.id:
+                            current.id += fragment.id
+                        function = getattr(fragment, "function", None)
+                        if function is not None:
+                            if function.name:
+                                current.name += function.name
+                            if function.arguments:
+                                current.arguments += function.arguments
+                if not saw_choice:
+                    raise ModelProtocolError()
+                tool_calls = []
+                for index in sorted(tool_parts):
+                    current = tool_parts[index]
+                    if not current.id or not current.name:
+                        raise ModelProtocolError()
+                    tool_calls.append(ToolCall(current.id, current.name, current.arguments))
+                return AssistantTurn("".join(parts) or None, tuple(tool_calls))
             except (RateLimitError, APITimeoutError, APIConnectionError) as error:
+                if delivered_text:
+                    raise self._provider_error(error) from error
                 if self._retry_or_raise(error, attempt):
                     continue
                 raise AssertionError("unreachable")
             except APIStatusError as error:
+                if delivered_text:
+                    raise self._provider_error(error) from error
                 if error.status_code >= 500 and self._retry_or_raise(error, attempt):
                     continue
                 raise self._provider_error(error) from error
@@ -76,22 +130,6 @@ class DeepSeekClient(ModelClient):
                 raise self._provider_error(error) from error
 
         raise AssertionError("unreachable")
-
-    @staticmethod
-    def _to_turn(completion: Any) -> AssistantTurn:
-        if not completion.choices:
-            raise ModelProtocolError()
-
-        message = completion.choices[0].message
-        tool_calls = tuple(
-            ToolCall(
-                id=tool_call.id,
-                name=tool_call.function.name,
-                arguments_json=tool_call.function.arguments,
-            )
-            for tool_call in (message.tool_calls or ())
-        )
-        return AssistantTurn(content=message.content, tool_calls=tool_calls)
 
     def _retry_or_raise(self, error: OpenAIError, attempt: int) -> bool:
         self._log_error(error, attempt)

@@ -119,13 +119,21 @@ class AgentLoop:
                 return self._finish(run_id, step_count - 1, "cancelled", None, _CANCELLED_ERROR)
             self._assert_no_database_transaction()
             try:
-                turn = self._model.complete(messages, self._registry.schemas())
+                self._emit("assistant.started", run_id, {})
+                turn = self._model.complete(
+                    messages,
+                    self._registry.schemas(),
+                    on_text_delta=lambda delta: self._emit(
+                        "assistant.delta", run_id, {"delta": delta}
+                    ),
+                )
             except ModelProviderError as error:
                 return self._finish(run_id, step_count, "failed", None, error.safe_message)
             except Exception:
                 return self._finish(run_id, step_count, "failed", None, _PROVIDER_ERROR)
 
             self._persist_assistant(run_id, session_id, turn)
+            self._emit("assistant.finished", run_id, {})
             messages.append(self._assistant_message(turn))
 
             if not turn.tool_calls:
@@ -264,6 +272,7 @@ class AgentLoop:
             )
             self._rollback_repository()
 
+        failed_state_persisted = False
         try:
             self._repository.finish_run(
                 run_id,
@@ -271,12 +280,30 @@ class AgentLoop:
                 step_count=self._current_step_count,
                 error_text=_INTERNAL_ERROR,
             )
+            failed_state_persisted = True
         except Exception as finish_error:
             logger.exception(
                 "Could not persist failed run state (type=%s)",
                 type(finish_error).__name__,
             )
             self._rollback_repository()
+
+        if failed_state_persisted and self._event_sink is not None:
+            terminal_data: object = {"status": "failed"}
+            try:
+                detail = self._repository.get_run_detail(run_id)
+            except Exception as detail_error:
+                logger.exception(
+                    "Could not reload failed run detail (type=%s)",
+                    type(detail_error).__name__,
+                )
+                self._rollback_repository()
+            else:
+                if detail is None:
+                    logger.error("Could not reload failed run detail (run missing)")
+                else:
+                    terminal_data = asdict(detail)
+            self._emit("run.finished", run_id, terminal_data)
 
         return AgentRunResult(
             "failed", self._current_step_count, None, _INTERNAL_ERROR

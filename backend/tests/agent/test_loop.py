@@ -84,13 +84,21 @@ def test_loop_emits_committed_execution_events(run_context) -> None:
     assert result.status == "completed"
     assert [event.type for event in events] == [
         "message.created",
+        "assistant.started",
         "message.created",
+        "assistant.finished",
         "tool.started",
         "tool.finished",
         "message.created",
+        "assistant.started",
+        "assistant.delta",
         "message.created",
+        "assistant.finished",
         "files.changed",
         "run.finished",
+    ]
+    assert [event.data for event in events if event.type == "assistant.delta"] == [
+        {"delta": "Done."}
     ]
     assert events[-1].data["status"] == "completed"  # type: ignore[index]
 
@@ -179,21 +187,137 @@ def test_loop_fails_for_blank_terminal_content_and_persists_evidence(run_context
 
 
 def test_loop_fails_with_safe_provider_error(run_context):
-    loop = AgentLoop(ScriptedModelClient([RuntimeError("secret internal detail")]), run_context.registry, run_context.repository, run_context.workspace)
+    events: list[RunEvent] = []
+    loop = AgentLoop(
+        ScriptedModelClient([RuntimeError("secret internal detail")]),
+        run_context.registry,
+        run_context.repository,
+        run_context.workspace,
+        event_sink=events.append,
+    )
 
     result = loop.run(run_id=run_context.run.id, session_id=run_context.session.id, prompt="work", prior_messages=[], max_steps=20)
 
     assert result.status == "failed"
     assert result.error_text == "The model provider request failed."
     assert "secret" not in run_context.repository.get_run_detail(run_context.run.id).error_text
+    assert [event.type for event in events if event.type.startswith("assistant.")] == [
+        "assistant.started"
+    ]
+
+
+def test_unexpected_failure_publishes_one_minimal_terminal_when_reload_raises(
+    run_context, monkeypatch, caplog
+) -> None:
+    events: list[RunEvent] = []
+
+    def fail_add_message(*args, **kwargs):
+        raise RuntimeError("trigger recovery")
+
+    def fail_detail_reload(run_id):
+        raise RuntimeError("reload failed")
+
+    monkeypatch.setattr(run_context.repository, "add_message", fail_add_message)
+    monkeypatch.setattr(run_context.repository, "get_run_detail", fail_detail_reload)
+    loop = AgentLoop(
+        ScriptedModelClient([]),
+        run_context.registry,
+        run_context.repository,
+        run_context.workspace,
+        event_sink=events.append,
+    )
+
+    result = loop.run(
+        run_id=run_context.run.id,
+        session_id=run_context.session.id,
+        prompt="work",
+        prior_messages=[],
+        max_steps=20,
+    )
+
+    terminal = [event for event in events if event.type == "run.finished"]
+    assert result.status == "failed"
+    assert [event.data for event in terminal] == [{"status": "failed"}]
+    assert "Could not reload failed run detail" in caplog.text
+    persisted = RunRepository(run_context.repository.db).get_run_detail(run_context.run.id)
+    assert persisted is not None
+    assert persisted.status == "failed"
+
+
+def test_unexpected_failure_publishes_one_minimal_terminal_when_reload_is_missing(
+    run_context, monkeypatch, caplog
+) -> None:
+    events: list[RunEvent] = []
+
+    def fail_add_message(*args, **kwargs):
+        raise RuntimeError("trigger recovery")
+
+    monkeypatch.setattr(run_context.repository, "add_message", fail_add_message)
+    monkeypatch.setattr(run_context.repository, "get_run_detail", lambda run_id: None)
+    loop = AgentLoop(
+        ScriptedModelClient([]),
+        run_context.registry,
+        run_context.repository,
+        run_context.workspace,
+        event_sink=events.append,
+    )
+
+    result = loop.run(
+        run_id=run_context.run.id,
+        session_id=run_context.session.id,
+        prompt="work",
+        prior_messages=[],
+        max_steps=20,
+    )
+
+    terminal = [event for event in events if event.type == "run.finished"]
+    assert result.status == "failed"
+    assert [event.data for event in terminal] == [{"status": "failed"}]
+    assert "Could not reload failed run detail (run missing)" in caplog.text
+    persisted = RunRepository(run_context.repository.db).get_run_detail(run_context.run.id)
+    assert persisted is not None
+    assert persisted.status == "failed"
+
+
+def test_unexpected_failure_publishes_no_terminal_when_finish_run_fails(
+    run_context, monkeypatch
+) -> None:
+    events: list[RunEvent] = []
+
+    def fail_add_message(*args, **kwargs):
+        raise RuntimeError("trigger recovery")
+
+    def fail_finish_run(*args, **kwargs):
+        raise RuntimeError("finish failed")
+
+    monkeypatch.setattr(run_context.repository, "add_message", fail_add_message)
+    monkeypatch.setattr(run_context.repository, "finish_run", fail_finish_run)
+    loop = AgentLoop(
+        ScriptedModelClient([]),
+        run_context.registry,
+        run_context.repository,
+        run_context.workspace,
+        event_sink=events.append,
+    )
+
+    result = loop.run(
+        run_id=run_context.run.id,
+        session_id=run_context.session.id,
+        prompt="work",
+        prior_messages=[],
+        max_steps=20,
+    )
+
+    assert result.status == "failed"
+    assert [event for event in events if event.type == "run.finished"] == []
 
 
 def test_loop_checks_cancellation_before_each_provider_call(run_context):
     token = CancellationToken()
 
     class CancellingModel(ScriptedModelClient):
-        def complete(self, messages, tools):
-            turn = super().complete(messages, tools)
+        def complete(self, messages, tools, on_text_delta=None):
+            turn = super().complete(messages, tools, on_text_delta=on_text_delta)
             token.cancel()
             return turn
 
