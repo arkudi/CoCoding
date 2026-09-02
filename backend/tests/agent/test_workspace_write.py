@@ -2,7 +2,12 @@ import hashlib
 
 import pytest
 
-from app.agent.workspace import FileChangeEvidence, WorkspaceError, WorkspaceService
+from app.agent.workspace import (
+    FileChangeEvidence,
+    WorkspaceError,
+    WorkspacePatch,
+    WorkspaceService,
+)
 
 
 def test_write_snapshots_original_only_once_and_builds_diff(tmp_path):
@@ -86,6 +91,30 @@ def test_replace_writes_single_match(tmp_path):
     assert result["path"] == "a.txt"
     assert result["content"] == "three two"
     assert (tmp_path / "a.txt").read_bytes() == b"three two\n"
+
+
+def test_apply_patch_validates_all_edits_before_writing(tmp_path):
+    (tmp_path / "a.txt").write_text("before a", encoding="utf-8")
+    (tmp_path / "b.txt").write_text("before b", encoding="utf-8")
+    service = WorkspaceService(tmp_path)
+
+    with pytest.raises(WorkspaceError, match="PATCH_NO_MATCH"):
+        service.apply_patch((
+            WorkspacePatch("a.txt", "before", "after"),
+            WorkspacePatch("b.txt", "missing", "after"),
+        ))
+
+    assert (tmp_path / "a.txt").read_text(encoding="utf-8") == "before a"
+    assert (tmp_path / "b.txt").read_text(encoding="utf-8") == "before b"
+
+
+def test_apply_patch_can_create_a_new_file(tmp_path):
+    service = WorkspaceService(tmp_path)
+
+    result = service.apply_patch((WorkspacePatch("new.txt", None, "created\n"),))
+
+    assert result == {"paths": ["new.txt"]}
+    assert service.changes()[0].operation == "created"
 
 
 def test_get_diff_covers_all_changed_files_in_sorted_order(tmp_path):

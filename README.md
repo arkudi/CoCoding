@@ -77,6 +77,12 @@ curl.exe -sS -X POST "http://127.0.0.1:8000/api/sessions/$($session.id)/runs" `
 
 The returned Run initially has status `running`. Follow `ws://127.0.0.1:8000/api/runs/{run_id}/events`, or query `GET /api/runs/{run_id}`. Run history is available from `GET /api/sessions/{session_id}/runs`.
 
+The model can submit a structured `finish_task` call containing its summary, changed
+files, tests, and unresolved issues. The runtime verifies file claims against workspace
+write evidence and test claims against recorded command results. Unsupported claims are
+returned to the model for correction instead of completing the Run. Plain-text final
+responses remain supported for compatibility.
+
 Visible assistant text is streamed through `assistant.started`, `assistant.delta`, and `assistant.finished` WebSocket events. Deltas are
 transient UI state; complete assistant messages and terminal Run state remain
 the durable SQLite record. Tool-call arguments and model reasoning are never
@@ -102,13 +108,24 @@ npm test
 npm run build
 ```
 
+Run the deterministic agent evaluation suite with a configured DeepSeek key:
+
+```powershell
+python -m app.evals backend/eval_suites/coding_baseline.json
+```
+
+Evaluation cases run in isolated temporary workspaces and report status, step count,
+tool calls, tool failures, file assertions, response assertions, latency, and an
+overall pass/fail result as JSON. Add cases to the suite before changing agent
+behavior so improvements can be compared against a stable baseline.
+
 ## Configuration
 
 Application configuration uses the `COCODING_` prefix, including `COCODING_DATABASE_URL` and `COCODING_FRONTEND_DIST`. DeepSeek configuration uses the unprefixed `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL`, and `DEEPSEEK_MODEL` names shown in `.env.example`. A local `.env` file is ignored by Git and may hold machine-specific settings; never commit credentials. `.env.example` intentionally leaves `DEEPSEEK_API_KEY` blank.
 
 ## Current scope
 
-CoCoding now provides a local session-aware Vue workspace, a background Run API backed by a DeepSeek tool-calling agent, WebSocket execution events, cooperative cancellation, persisted Run history, tool evidence, safe text preview, unified Diff display, and a production-like static frontend host. The Agent can list and read workspace files, write and replace workspace files, inspect its changes, and run bounded local commands with the workspace as their current directory. Those commands retain the host user's filesystem and process access.
+CoCoding now provides a local session-aware Vue workspace, a background Run API backed by a DeepSeek tool-calling agent, WebSocket execution events, cooperative cancellation, persisted Run history, tool evidence, safe text preview, unified Diff display, and a production-like static frontend host. The Agent can list, search, and read workspace files; write, replace, and apply validated multi-file text patches; inspect workspace and Git changes; run bounded commands; and invoke recognized test runners with structured result counts. Commands retain the host user's filesystem and process access.
 
 ## Dependency debt
 
