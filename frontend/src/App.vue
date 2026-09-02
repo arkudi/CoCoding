@@ -49,6 +49,7 @@ watch(
       @cancel="runs.requestCancel"
     />
     <Workspace
+      :workspace-path="current?.workspace_path ?? null"
       :files="workspace.files"
       :selected-path="workspace.selected_path"
       :preview="workspace.preview"

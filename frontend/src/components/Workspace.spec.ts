@@ -6,7 +6,7 @@ import Workspace from './Workspace.vue'
 test('switches to Diff and renders unified file evidence', async () => {
   const user = userEvent.setup()
   render(Workspace, { props: {
-    files: [], selectedPath: null, preview: null, error: null,
+    workspacePath: 'F:/demo/calculator', files: [], selectedPath: null, preview: null, error: null,
     loading: false, syncing: false, truncated: false, lastSyncedAt: null,
     fileChanges: [{
       id: 'change-1', run_id: 'run-1', relative_path: 'src/main.py', operation: 'modified',
@@ -18,4 +18,15 @@ test('switches to Diff and renders unified file evidence', async () => {
   await user.click(screen.getByRole('button', { name: 'src/main.py' }))
   expect(screen.getByText(/-old/)).toBeTruthy()
   expect(screen.getByRole('tab', { name: 'Diff' }).getAttribute('aria-selected')).toBe('true')
+})
+
+test('shows the active workspace path above the file view', () => {
+  render(Workspace, { props: {
+    workspacePath: 'F:/Codes/agent', files: [], selectedPath: null, preview: null, error: null,
+    loading: false, syncing: false, truncated: false, lastSyncedAt: null, fileChanges: [],
+  } })
+
+  expect(screen.getByText('当前路径')).toBeTruthy()
+  expect(screen.getByText('F:/Codes/agent')).toBeTruthy()
+  expect(screen.getByText('F:/Codes/agent').closest('.workspace-path')?.getAttribute('title')).toBe('F:/Codes/agent')
 })
