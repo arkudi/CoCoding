@@ -17,6 +17,7 @@ from app.agent.service import (
     RunNotFoundError,
 )
 from app.agent.types import ModelClient
+from app.agent.verifier import VerificationPolicy
 from app.db.run_repository import RunDetail, RunRepository
 
 
@@ -44,9 +45,13 @@ class RunManager:
         self,
         session_factory: sessionmaker,
         event_hub: RunEventHub,
+        hard_step_limit: int = 50,
+        verification_policy: VerificationPolicy | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._hub = event_hub
+        self._hard_step_limit = hard_step_limit
+        self._verification_policy = verification_policy or VerificationPolicy()
         self._executor = ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="cocoding-agent"
         )
@@ -59,7 +64,6 @@ class RunManager:
         self,
         session_id: str,
         prompt: str,
-        max_steps: int,
         model_client: ModelClient,
     ) -> RunDetail:
         with self._state_lock:
@@ -67,8 +71,12 @@ class RunManager:
                 raise RuntimeError("Run manager is shut down")
             if self._active is not None:
                 raise AgentBusyError()
-            service = AgentService(self._session_factory, model_client)
-            detail = service.create_run(session_id, prompt, max_steps)
+            service = AgentService(
+                self._session_factory,
+                model_client,
+                verification_policy=self._verification_policy,
+            )
+            detail = service.create_run(session_id, prompt, self._hard_step_limit)
             token = CancellationToken()
             active = _ActiveRun(detail.id, token)
             self._active = active
@@ -136,7 +144,9 @@ class RunManager:
                 RunEvent.create("run.started", run_id, {"status": "running"})
             )
             finished = AgentService(
-                self._session_factory, model_client
+                self._session_factory,
+                model_client,
+                verification_policy=self._verification_policy,
             ).execute_existing(run_id, token, self._hub.publish)
             with self._session_factory() as db:
                 RunRepository(db).set_session_status(

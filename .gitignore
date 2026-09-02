@@ -47,6 +47,7 @@ build/
 *.egg-info/
 
 # Local Superpowers design and planning artifacts
+docs/
 /docs/superpowers/
 /.superpowers/
 

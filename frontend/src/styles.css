@@ -60,12 +60,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
 .session-list button:hover, .session-list button.selected { border-left-color: var(--signal); background: #e5eadf; }
 .session-list small { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
 
-.timeline { min-width: 0; height: 100vh; padding: 42px clamp(26px, 5vw, 76px); overflow: hidden; }
-.timeline > .empty-state { display: grid; align-content: center; min-height: calc(100vh - 84px); max-width: 580px; }
+.timeline { --timeline-gutter: clamp(26px, 5vw, 76px); min-width: 0; height: 100vh; padding: 42px 0 0; overflow: hidden; }
+.timeline > .empty-state { display: grid; align-content: center; min-height: calc(100vh - 42px); max-width: 580px; padding: 0 var(--timeline-gutter) 42px; }
 .empty-state h1, .timeline-header h1 { margin: 9px 0; font-family: "Palatino Linotype", Palatino, serif; font-weight: 500; letter-spacing: -.035em; }
 .empty-state h1 { font-size: clamp(44px, 6vw, 76px); line-height: .95; }
-.timeline-shell { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; width: min(880px, 100%); height: 100%; margin: 0 auto; }
-.timeline-header { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; padding-bottom: 24px; border-bottom: 1px solid var(--line); }
+.timeline-shell { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; width: 100%; height: 100%; }
+.timeline-header { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; padding: 0 var(--timeline-gutter) 24px; border-bottom: 1px solid var(--line); }
 .timeline-header h1 { font-size: clamp(34px, 4vw, 52px); }
 .eyebrow { color: var(--signal); font-size: 11px; font-weight: 800; letter-spacing: .17em; }
 .empty-copy, .empty-state p, .duration { color: var(--muted); }
@@ -106,8 +106,7 @@ pre { margin: 0; font-family: "Cascadia Code", Consolas, monospace; font-size: 1
 .run-composer { display: grid; gap: 9px; width: 100%; padding: 17px; border: 1px solid #bdb6a7; background: rgba(248, 245, 235, .97); box-shadow: var(--shadow); }
 .run-composer > label { font-size: 12px; font-weight: 700; }
 .run-composer textarea { resize: vertical; min-height: 90px; }
-.composer-actions { display: grid; grid-template-columns: auto 74px 1fr; gap: 10px; align-items: center; }
-.composer-actions label { color: var(--muted); font-size: 11px; }
+.composer-actions { display: flex; justify-content: flex-end; gap: 10px; align-items: center; }
 
 .tabs { display: flex; gap: 19px; border-bottom: 1px solid var(--line); }
 .tab { padding: 0 0 11px; border: 0; color: var(--muted); background: transparent; cursor: pointer; }
@@ -133,13 +132,12 @@ pre { margin: 0; font-family: "Cascadia Code", Consolas, monospace; font-size: 1
 @media (max-width: 720px) {
   .app-shell { display: block; height: auto; overflow: visible; }
   .sidebar, .timeline, .workspace { width: 100%; border: 0; }
-  .timeline { height: 70vh; min-height: 70vh; padding: 30px 18px; overflow: hidden; }
+  .timeline { --timeline-gutter: 18px; height: 70vh; min-height: 70vh; padding: 30px 0 0; overflow: hidden; }
   .user-message { margin-left: 18px; }
   .assistant-message { margin-right: 18px; }
   .workspace { min-height: 30rem; }
   .timeline-header { align-items: flex-end; }
-  .composer-actions { grid-template-columns: 1fr 70px; }
-  .composer-actions .primary, .composer-actions .danger { grid-column: 1 / -1; }
+  .composer-actions .primary, .composer-actions .danger { width: 100%; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }

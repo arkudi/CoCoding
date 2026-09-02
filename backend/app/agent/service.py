@@ -14,6 +14,7 @@ from app.agent.loop import AgentLoop, CancellationToken
 from app.agent.tools import ToolRegistry
 from app.agent.types import ModelClient
 from app.agent.workspace import WorkspaceService
+from app.agent.verifier import VerificationPolicy
 from app.db.models import SessionRecord
 from app.db.run_repository import RunDetail, RunRepository
 
@@ -46,10 +47,12 @@ class AgentService:
         session_factory: sessionmaker,
         model_client: ModelClient,
         execution_lock: threading.Lock | None = None,
+        verification_policy: VerificationPolicy | None = None,
     ) -> None:
         self.session_factory = session_factory
         self.model_client = model_client
         self.execution_lock = execution_lock
+        self.verification_policy = verification_policy or VerificationPolicy()
 
     def execute(self, session_id: str, prompt: str, max_steps: int) -> RunDetail:
         if self.execution_lock is None:
@@ -111,6 +114,7 @@ class AgentService:
                     repository,
                     workspace,
                     event_sink=event_sink,
+                    verification_policy=self.verification_policy,
                 )
                 result = loop.run(
                     run_id=run_id,

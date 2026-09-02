@@ -13,6 +13,7 @@ from app.agent.provider import DeepSeekClient
 from app.agent.events import RunEventHub
 from app.agent.run_manager import RunManager
 from app.agent.types import ModelClient
+from app.agent.verifier import VerificationPolicy
 from app.config import Settings, get_settings
 from app.db.database import build_engine, build_session_factory, create_schema
 from app.db.run_repository import RunRepository
@@ -33,6 +34,16 @@ def create_app(
         application.state.run_manager = RunManager(
             application.state.session_factory,
             application.state.event_hub,
+            hard_step_limit=resolved.agent_hard_step_limit,
+            verification_policy=VerificationPolicy(
+                require_code_verification=resolved.agent_require_code_verification,
+                allow_unverified_code_with_reason=(
+                    resolved.agent_allow_unverified_code_with_reason
+                ),
+                require_resolved_test_failures=(
+                    resolved.agent_require_resolved_test_failures
+                ),
+            ),
         )
         db = application.state.session_factory()
         try:

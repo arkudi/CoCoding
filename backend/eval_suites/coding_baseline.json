@@ -1,0 +1,29 @@
+{
+  "name": "coding-baseline-v1",
+  "cases": [
+    {
+      "id": "targeted-edit",
+      "prompt": "Change the greeting in greeting.txt from hello to hello world, verify it, and summarize the result.",
+      "files": {"greeting.txt": "hello\n"},
+      "expect": {
+        "status": "completed",
+        "files_equal": {"greeting.txt": "hello world\n"},
+        "required_tools": ["read_file"],
+        "max_tool_failures": 0,
+        "max_steps": 8
+      }
+    },
+    {
+      "id": "diagnose-without-editing",
+      "prompt": "Inspect app.py and explain the arithmetic bug without changing files.",
+      "files": {"app.py": "def add(a, b):\n    return a - b\n"},
+      "expect": {
+        "status": "completed",
+        "required_tools": ["read_file"],
+        "final_response_contains": ["-"],
+        "max_tool_failures": 0,
+        "max_steps": 5
+      }
+    }
+  ]
+}

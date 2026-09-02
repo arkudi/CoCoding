@@ -15,6 +15,7 @@ from app.agent.provider import ModelProviderError
 from app.agent.prompts import build_system_prompt
 from app.agent.tools import ToolRegistry
 from app.agent.types import AssistantTurn, ModelClient, ToolCall, ToolError, ToolResult
+from app.agent.verifier import CompletionVerifier, VerificationPolicy, finish_task_schema
 from app.agent.workspace import WorkspaceService
 from app.db.run_repository import RunRepository
 
@@ -25,6 +26,10 @@ _CANCELLED_ERROR = "The run was cancelled."
 _PROVIDER_ERROR = "The model provider request failed."
 _TOOL_ERROR = "The tool could not be executed."
 _INTERNAL_ERROR = "The run failed because of an internal error."
+_FINISH_REQUIRED = (
+    "[Runtime verification] A plain response cannot complete this Run. "
+    "Call finish_task with evidence-backed completion details."
+)
 _PRIOR_HISTORY_CHARACTER_LIMIT = 40_000
 _TOOL_PAYLOAD_CHARACTER_LIMIT = 20_000
 
@@ -59,12 +64,14 @@ class AgentLoop:
         repository: RunRepository,
         workspace: WorkspaceService | None = None,
         event_sink: Callable[[RunEvent], None] | None = None,
+        verification_policy: VerificationPolicy | None = None,
     ) -> None:
         self._model = model
         self._registry = registry
         self._repository = repository
         self._workspace = workspace or registry._workspace
         self._event_sink = event_sink
+        self._verification_policy = verification_policy or VerificationPolicy()
         self._current_step_count = 0
 
     def run(
@@ -101,10 +108,11 @@ class AgentLoop:
         cancellation: CancellationToken | None = None,
     ) -> AgentRunResult:
         token = cancellation or CancellationToken()
+        self._workspace.capture_baseline()
         messages = [
             {
                 "role": "system",
-                "content": build_system_prompt(self._workspace.root, max_steps),
+                "content": build_system_prompt(self._workspace.root),
             },
             *self._bounded_prior_messages(prior_messages),
             {"role": "user", "content": prompt},
@@ -112,6 +120,7 @@ class AgentLoop:
         user_message = self._repository.add_message(run_id, session_id, "user", prompt)
         self._emit("message.created", run_id, self._record_data(user_message))
         step_count = 0
+        model_tools = [*self._registry.schemas(), finish_task_schema()]
 
         for step_count in range(1, max_steps + 1):
             self._current_step_count = step_count
@@ -122,7 +131,7 @@ class AgentLoop:
                 self._emit("assistant.started", run_id, {})
                 turn = self._model.complete(
                     messages,
-                    self._registry.schemas(),
+                    model_tools,
                     on_text_delta=lambda delta: self._emit(
                         "assistant.delta", run_id, {"delta": delta}
                     ),
@@ -139,7 +148,8 @@ class AgentLoop:
             if not turn.tool_calls:
                 if turn.content is None or not turn.content.strip():
                     return self._finish(run_id, step_count, "failed", None, _EMPTY_FINAL_RESPONSE)
-                return self._finish(run_id, step_count, "completed", turn.content, None)
+                messages.append({"role": "user", "content": _FINISH_REQUIRED})
+                continue
 
             for call in turn.tool_calls:
                 if token.is_cancelled:
@@ -148,7 +158,39 @@ class AgentLoop:
                     run_id, call.id, call.name, call.arguments_json
                 )
                 self._emit("tool.started", run_id, self._record_data(tool_call))
-                result = self._execute_tool(call)
+                if call.name == "finish_task":
+                    if len(turn.tool_calls) != 1:
+                        result = ToolResult(
+                            False,
+                            None,
+                            ToolError(
+                                "INVALID_COMPLETION",
+                                "finish_task must be the only tool call in its model turn.",
+                            ),
+                            0,
+                        )
+                        completion = None
+                    else:
+                        verification = CompletionVerifier(
+                            self._repository,
+                            self._workspace,
+                            self._verification_policy,
+                        ).verify(run_id, call.arguments_json)
+                        result = ToolResult(
+                            verification.ok,
+                            verification.payload(),
+                            None
+                            if verification.ok
+                            else ToolError(
+                                "COMPLETION_VERIFICATION_FAILED",
+                                "The completion claims did not match recorded evidence.",
+                            ),
+                            0,
+                        )
+                        completion = verification.completion
+                else:
+                    result = self._execute_tool(call)
+                    completion = None
                 payload = self._tool_payload(result)
                 finished_call = self._repository.finish_tool_call(
                     tool_call.id,
@@ -164,6 +206,14 @@ class AgentLoop:
                 messages.append(
                     {"role": "tool", "tool_call_id": call.id, "content": payload}
                 )
+                if call.name == "finish_task" and result.ok and completion is not None:
+                    return self._finish(
+                        run_id,
+                        step_count,
+                        "completed",
+                        completion.summary,
+                        None,
+                    )
 
         return self._finish(run_id, step_count, "max_steps", None, _MAX_STEPS_ERROR)
 

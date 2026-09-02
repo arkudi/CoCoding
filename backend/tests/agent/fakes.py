@@ -1,8 +1,39 @@
 from __future__ import annotations
 
 from collections import deque
+import json
 
-from app.agent.types import AssistantTurn
+from app.agent.types import AssistantTurn, ToolCall
+
+
+def finish(
+    summary: str,
+    *,
+    changed_files: list[str] | None = None,
+    tests: list[dict[str, object]] | None = None,
+    verification_note: str | None = None,
+    acceptance_checks: list[dict[str, object]] | None = None,
+    unresolved_issues: list[str] | None = None,
+    call_id: str = "finish-task",
+) -> AssistantTurn:
+    """Build the mandatory structured completion turn used by agent tests."""
+    return AssistantTurn(
+        summary,
+        (
+            ToolCall(
+                call_id,
+                "finish_task",
+                json.dumps({
+                    "summary": summary,
+                    "changed_files": changed_files or [],
+                    "tests": tests or [],
+                    "verification_note": verification_note,
+                    "acceptance_checks": acceptance_checks or [],
+                    "unresolved_issues": unresolved_issues or [],
+                }),
+            ),
+        ),
+    )
 
 
 class ScriptedModelClient:

@@ -35,8 +35,9 @@ class SessionRead(BaseModel):
 
 
 class RunCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     prompt: str = Field(min_length=1, max_length=20_000)
-    max_steps: int = Field(default=20, ge=1, le=50)
 
     @field_validator("prompt")
     @classmethod

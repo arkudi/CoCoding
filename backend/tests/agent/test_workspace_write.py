@@ -2,7 +2,12 @@ import hashlib
 
 import pytest
 
-from app.agent.workspace import FileChangeEvidence, WorkspaceError, WorkspaceService
+from app.agent.workspace import (
+    FileChangeEvidence,
+    WorkspaceError,
+    WorkspacePatch,
+    WorkspaceService,
+)
 
 
 def test_write_snapshots_original_only_once_and_builds_diff(tmp_path):
@@ -52,14 +57,16 @@ def test_replace_rejects_oversized_existing_file(tmp_path):
         WorkspaceService(tmp_path).replace_in_file("large.txt", "x", "y")
 
 
-def test_changes_and_get_diff_reject_externally_oversized_file(tmp_path):
+def test_changes_and_get_diff_track_externally_oversized_file(tmp_path):
     service = WorkspaceService(tmp_path)
     service.write_file("a.txt", "small")
     (tmp_path / "a.txt").write_bytes(b"x" * 1_048_577)
-    with pytest.raises(WorkspaceError, match="FILE_TOO_LARGE"):
-        service.changes()
-    with pytest.raises(WorkspaceError, match="FILE_TOO_LARGE"):
-        service.get_diff()
+
+    change = service.changes()[0]
+
+    assert change.operation == "created"
+    assert change.before_hash is None
+    assert service.get_diff() == "Binary file a.txt changed\n"
 
 
 def test_write_rejects_traversal_and_does_not_create_parent(tmp_path):
@@ -88,6 +95,30 @@ def test_replace_writes_single_match(tmp_path):
     assert (tmp_path / "a.txt").read_bytes() == b"three two\n"
 
 
+def test_apply_patch_validates_all_edits_before_writing(tmp_path):
+    (tmp_path / "a.txt").write_text("before a", encoding="utf-8")
+    (tmp_path / "b.txt").write_text("before b", encoding="utf-8")
+    service = WorkspaceService(tmp_path)
+
+    with pytest.raises(WorkspaceError, match="PATCH_NO_MATCH"):
+        service.apply_patch((
+            WorkspacePatch("a.txt", "before", "after"),
+            WorkspacePatch("b.txt", "missing", "after"),
+        ))
+
+    assert (tmp_path / "a.txt").read_text(encoding="utf-8") == "before a"
+    assert (tmp_path / "b.txt").read_text(encoding="utf-8") == "before b"
+
+
+def test_apply_patch_can_create_a_new_file(tmp_path):
+    service = WorkspaceService(tmp_path)
+
+    result = service.apply_patch((WorkspacePatch("new.txt", None, "created\n"),))
+
+    assert result == {"paths": ["new.txt"]}
+    assert service.changes()[0].operation == "created"
+
+
 def test_get_diff_covers_all_changed_files_in_sorted_order(tmp_path):
     service = WorkspaceService(tmp_path)
     service.write_file("z.txt", "z")
@@ -95,6 +126,35 @@ def test_get_diff_covers_all_changed_files_in_sorted_order(tmp_path):
     diff = service.get_diff()
     assert diff.index("a/a.txt") < diff.index("a/z.txt")
     assert "+a" in diff and "+z" in diff
+
+
+def test_baseline_detects_external_create_modify_and_delete(tmp_path):
+    (tmp_path / "modified.txt").write_text("before\n", encoding="utf-8")
+    (tmp_path / "deleted.txt").write_text("remove\n", encoding="utf-8")
+    service = WorkspaceService(tmp_path)
+    service.capture_baseline()
+
+    (tmp_path / "modified.txt").write_text("after\n", encoding="utf-8")
+    (tmp_path / "deleted.txt").unlink()
+    (tmp_path / "created.txt").write_text("new\n", encoding="utf-8")
+
+    changes = {change.path: change for change in service.changes()}
+    assert changes["modified.txt"].operation == "modified"
+    assert changes["deleted.txt"].operation == "deleted"
+    assert changes["created.txt"].operation == "created"
+    assert "-remove" in changes["deleted.txt"].unified_diff
+
+
+def test_baseline_recognizes_unambiguous_external_rename(tmp_path):
+    (tmp_path / "old.txt").write_text("same content\n", encoding="utf-8")
+    service = WorkspaceService(tmp_path)
+    service.capture_baseline()
+
+    (tmp_path / "old.txt").rename(tmp_path / "new.txt")
+
+    assert service.changes()[0].operation == "renamed"
+    assert service.changes()[0].path == "new.txt"
+    assert "rename from old.txt" in service.changes()[0].unified_diff
 
 
 def test_changes_are_immutable(tmp_path):

@@ -51,15 +51,91 @@ def test_execute_rejects_unknown_tool(tmp_path):
     assert result.error.code == "UNKNOWN_TOOL"
 
 
-def test_schemas_export_all_six_strict_function_definitions(tmp_path):
+def test_schemas_export_all_strict_function_definitions(tmp_path):
     schemas = ToolRegistry(WorkspaceService(tmp_path)).schemas()
 
     assert {schema["function"]["name"] for schema in schemas} == {
-        "list_files", "read_file", "write_file", "replace_in_file", "run_command", "get_diff",
+        "list_files", "read_file", "search_text", "write_file", "replace_in_file",
+        "apply_patch", "run_command", "run_tests", "git_status", "git_diff", "get_diff",
     }
     read_file = next(schema for schema in schemas if schema["function"]["name"] == "read_file")
     assert read_file["type"] == "function"
     assert read_file["function"]["parameters"]["additionalProperties"] is False
+
+
+def test_search_text_returns_bounded_line_matches(tmp_path):
+    (tmp_path / "a.py").write_text("Alpha\nother\nalpha again\n", encoding="utf-8")
+    registry = ToolRegistry(WorkspaceService(tmp_path))
+
+    result = registry.execute(call("search_text", {
+        "query": "alpha", "case_sensitive": False, "max_results": 1,
+    }))
+
+    assert result.ok is True
+    assert result.data == {
+        "matches": [{"path": "a.py", "line": 1, "text": "Alpha"}],
+        "truncated": True,
+    }
+    assert result.truncated is True
+
+
+def test_apply_patch_updates_multiple_files_after_preflight(tmp_path):
+    (tmp_path / "a.txt").write_text("before a", encoding="utf-8")
+    (tmp_path / "b.txt").write_text("before b", encoding="utf-8")
+    registry = ToolRegistry(WorkspaceService(tmp_path))
+
+    result = registry.execute(call("apply_patch", {"patches": [
+        {"path": "a.txt", "old_text": "before", "new_text": "after"},
+        {"path": "b.txt", "old_text": "before", "new_text": "after"},
+    ]}))
+
+    assert result.ok is True
+    assert result.data == {"paths": ["a.txt", "b.txt"]}
+    assert (tmp_path / "a.txt").read_text(encoding="utf-8") == "after a"
+    assert (tmp_path / "b.txt").read_text(encoding="utf-8") == "after b"
+
+
+def test_run_tests_returns_structured_pytest_summary(tmp_path):
+    (tmp_path / "test_sample.py").write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+    registry = ToolRegistry(WorkspaceService(tmp_path))
+
+    result = registry.execute(call("run_tests", {
+        "command": f'"{sys.executable}" -m pytest test_sample.py -q',
+        "timeout": 30,
+    }))
+
+    assert result.ok is True
+    assert result.data["exit_code"] == 0
+    assert result.data["test_summary"]["passed"] == 1
+
+
+def test_run_tests_rejects_shell_chaining_before_execution(tmp_path, monkeypatch):
+    monkeypatch.setattr("app.agent.tools.subprocess.Popen", fail_if_command_starts)
+    result = ToolRegistry(WorkspaceService(tmp_path)).execute(
+        call("run_tests", {"command": "pytest; echo unsafe"})
+    )
+
+    assert result.ok is False
+    assert result.error.code == "UNSUPPORTED_TEST_COMMAND"
+
+
+def test_git_status_and_diff_are_structured_tools(tmp_path):
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / "tracked.txt").write_text("before\n", encoding="utf-8")
+    subprocess.run(["git", "add", "tracked.txt"], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "seed"],
+        cwd=tmp_path,
+        check=True,
+    )
+    (tmp_path / "tracked.txt").write_text("after\n", encoding="utf-8")
+    registry = ToolRegistry(WorkspaceService(tmp_path))
+
+    status = registry.execute(call("git_status", {}))
+    diff = registry.execute(call("git_diff", {"staged": False}))
+
+    assert status.ok is True and "tracked.txt" in status.data["stdout"]
+    assert diff.ok is True and "+after" in diff.data["stdout"]
 
 
 def test_execute_dispatches_each_workspace_tool_and_serializes_result(tmp_path):

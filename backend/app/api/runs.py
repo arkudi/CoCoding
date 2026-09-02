@@ -39,7 +39,7 @@ def create_run(
 ) -> RunRead:
     try:
         return RunRead.model_validate(
-            manager.start(session_id, payload.prompt, payload.max_steps, model_client)
+            manager.start(session_id, payload.prompt, model_client)
         )
     except SessionNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found") from error
