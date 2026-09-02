@@ -77,6 +77,14 @@ curl.exe -sS -X POST "http://127.0.0.1:8000/api/sessions/$($session.id)/runs" `
 
 The returned Run initially has status `running`. Follow `ws://127.0.0.1:8000/api/runs/{run_id}/events`, or query `GET /api/runs/{run_id}`. Run history is available from `GET /api/sessions/{session_id}/runs`.
 
+Multi-agent orchestration is enabled by default. A read-only Manager can delegate
+serial, bounded subtasks to an Explorer, an Implementer, or a Reviewer. Only the
+Implementer receives write and general command tools. All model calls share the
+Run's hard turn budget, and delegation is limited to three workers by default.
+Parent/child execution records are persisted and shown live in the Agent Team trace.
+Configure this with `COCODING_AGENT_MULTI_AGENT_ENABLED`,
+`COCODING_AGENT_MAX_DELEGATIONS`, and `COCODING_AGENT_CHILD_STEP_LIMIT`.
+
 The model submits a structured `finish_task` call containing its summary, changed files,
 tests, and unresolved issues. The runtime verifies file claims against a full workspace
 baseline and test claims against recorded command results. This includes files created,
@@ -124,11 +132,14 @@ Run the deterministic agent evaluation suite with a configured DeepSeek key:
 
 ```powershell
 python -m app.evals backend/eval_suites/coding_baseline.json
+python -m app.evals backend/eval_suites/orchestration_comparison.json
 ```
 
 Evaluation cases run in isolated temporary workspaces and report status, step count,
-tool calls, tool failures, file assertions, response assertions, latency, and an
-overall pass/fail result as JSON. Add cases to the suite before changing agent
+tool calls, tool failures, agent roles, orchestration mode, file assertions,
+response assertions, latency, and an overall pass/fail result as JSON. Reports
+also aggregate average steps and tool failures by single- versus multi-agent mode.
+Add cases to the suite before changing agent
 behavior so improvements can be compared against a stable baseline.
 
 ## Configuration

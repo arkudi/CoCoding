@@ -78,6 +78,92 @@ def test_repository_persists_complete_run_evidence(
         detail.status = "failed"  # type: ignore[misc]
 
 
+def test_repository_persists_hierarchical_agent_executions(
+    db: Session, workspace_session: SessionRecord
+) -> None:
+    repo = RunRepository(db)
+    run = repo.create_run(
+        session_id=workspace_session.id,
+        prompt="change it",
+        model="fake",
+        prompt_version="v1",
+        max_steps=20,
+    )
+
+    manager = repo.start_agent_execution(run.id, role="manager", task="change it")
+    worker = repo.start_agent_execution(
+        run.id,
+        role="explorer",
+        task="inspect the project",
+        parent_execution_id=manager.id,
+    )
+    repo.finish_agent_execution(
+        worker.id,
+        "completed",
+        step_count=2,
+        final_result_json='{"summary":"found it"}',
+    )
+
+    detail = repo.get_run_detail(run.id)
+
+    assert detail is not None
+    assert [execution.role for execution in detail.agent_executions] == [
+        "manager",
+        "explorer",
+    ]
+    assert detail.agent_executions[1].parent_execution_id == manager.id
+    assert detail.agent_executions[1].status == "completed"
+    assert detail.agent_executions[1].step_count == 2
+    assert detail.agent_executions[1].final_result_json == '{"summary":"found it"}'
+    assert detail.agent_executions[1].finished_at is not None
+
+
+def test_agent_execution_rejects_parent_from_another_run(
+    db: Session, workspace_session: SessionRecord
+) -> None:
+    repo = RunRepository(db)
+    first = repo.create_run(
+        session_id=workspace_session.id,
+        prompt="first",
+        model="fake",
+        prompt_version="v1",
+        max_steps=20,
+    )
+    second = repo.create_run(
+        session_id=workspace_session.id,
+        prompt="second",
+        model="fake",
+        prompt_version="v1",
+        max_steps=20,
+    )
+    parent = repo.start_agent_execution(first.id, role="manager", task="first")
+
+    with pytest.raises(ValueError, match="does not belong"):
+        repo.start_agent_execution(
+            second.id,
+            role="explorer",
+            task="inspect",
+            parent_execution_id=parent.id,
+        )
+
+
+def test_agent_execution_requires_terminal_finish_status(
+    db: Session, workspace_session: SessionRecord
+) -> None:
+    repo = RunRepository(db)
+    run = repo.create_run(
+        session_id=workspace_session.id,
+        prompt="prompt",
+        model="fake",
+        prompt_version="v1",
+        max_steps=20,
+    )
+    execution = repo.start_agent_execution(run.id, role="manager", task="prompt")
+
+    with pytest.raises(ValueError, match="must be terminal"):
+        repo.finish_agent_execution(execution.id, "running", step_count=1)
+
+
 def test_each_mutation_helper_leaves_no_open_database_transaction(
     db: Session, workspace_session: SessionRecord
 ) -> None:

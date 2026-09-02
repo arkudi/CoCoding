@@ -58,6 +58,29 @@ class RunRecord(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class AgentExecutionRecord(Base):
+    __tablename__ = "agent_executions"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('running', 'completed', 'failed', 'cancelled')",
+            name="agent_execution_status_is_valid",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id"), index=True)
+    parent_execution_id: Mapped[str | None] = mapped_column(
+        ForeignKey("agent_executions.id"), nullable=True, index=True
+    )
+    role: Mapped[str] = mapped_column(String(30), index=True)
+    task: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), default="running", index=True)
+    step_count: Mapped[int] = mapped_column(Integer, default=0)
+    final_result_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class MessageRecord(Base):
     __tablename__ = "messages"
 

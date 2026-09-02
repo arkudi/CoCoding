@@ -11,6 +11,12 @@ from sqlalchemy.orm import sessionmaker
 
 from app.agent.events import RunEvent
 from app.agent.loop import AgentLoop, CancellationToken
+from app.agent.orchestration import (
+    MANAGER_TOOLS,
+    MultiAgentCoordinator,
+    SharedStepBudget,
+    build_manager_prompt,
+)
 from app.agent.tools import ToolRegistry
 from app.agent.types import ModelClient
 from app.agent.workspace import WorkspaceService
@@ -20,6 +26,7 @@ from app.db.run_repository import RunDetail, RunRepository
 
 
 _PROMPT_VERSION = "coding_agent_v1"
+_MULTI_AGENT_PROMPT_VERSION = "manager_worker_v1"
 _INTERNAL_ERROR = "The run failed because of an internal error."
 
 logger = logging.getLogger(__name__)
@@ -48,11 +55,17 @@ class AgentService:
         model_client: ModelClient,
         execution_lock: threading.Lock | None = None,
         verification_policy: VerificationPolicy | None = None,
+        multi_agent_enabled: bool = False,
+        max_delegations: int = 3,
+        child_step_limit: int = 10,
     ) -> None:
         self.session_factory = session_factory
         self.model_client = model_client
         self.execution_lock = execution_lock
         self.verification_policy = verification_policy or VerificationPolicy()
+        self.multi_agent_enabled = multi_agent_enabled
+        self.max_delegations = max_delegations
+        self.child_step_limit = child_step_limit
 
     def execute(self, session_id: str, prompt: str, max_steps: int) -> RunDetail:
         if self.execution_lock is None:
@@ -79,7 +92,11 @@ class AgentService:
                 session_id=session_id,
                 prompt=prompt,
                 model=self._model_name(),
-                prompt_version=_PROMPT_VERSION,
+                prompt_version=(
+                    _MULTI_AGENT_PROMPT_VERSION
+                    if self.multi_agent_enabled
+                    else _PROMPT_VERSION
+                ),
                 max_steps=max_steps,
             )
             detail = repository.get_run_detail(run.id)
@@ -108,6 +125,51 @@ class AgentService:
             workspace = WorkspaceService(workspace_path)
             step_count = 0
             try:
+                loop_options: dict[str, object] = {}
+                if self.multi_agent_enabled:
+                    manager = repository.start_agent_execution(
+                        run_id, role="manager", task=detail.prompt
+                    )
+                    if event_sink is not None:
+                        event_sink(
+                            RunEvent.create(
+                                "agent.started",
+                                run_id,
+                                {
+                                    "id": manager.id,
+                                    "run_id": manager.run_id,
+                                    "parent_execution_id": manager.parent_execution_id,
+                                    "role": manager.role,
+                                    "task": manager.task,
+                                    "status": manager.status,
+                                    "step_count": manager.step_count,
+                                    "final_result_json": manager.final_result_json,
+                                    "started_at": manager.started_at,
+                                    "finished_at": manager.finished_at,
+                                },
+                            )
+                        )
+                    budget = SharedStepBudget(detail.max_steps)
+                    coordinator = MultiAgentCoordinator(
+                        model=self.model_client,
+                        registry=ToolRegistry(workspace),
+                        repository=repository,
+                        run_id=run_id,
+                        parent_execution_id=manager.id,
+                        workspace=workspace.root,
+                        budget=budget,
+                        cancellation=cancellation,
+                        event_sink=event_sink,
+                        max_delegations=self.max_delegations,
+                        child_step_limit=self.child_step_limit,
+                    )
+                    loop_options = {
+                        "allowed_tools": MANAGER_TOOLS,
+                        "delegator": coordinator.delegate,
+                        "shared_budget": budget,
+                        "system_prompt": build_manager_prompt(workspace.root),
+                        "execution_id": manager.id,
+                    }
                 loop = AgentLoop(
                     self.model_client,
                     ToolRegistry(workspace),
@@ -115,6 +177,7 @@ class AgentService:
                     workspace,
                     event_sink=event_sink,
                     verification_policy=self.verification_policy,
+                    **loop_options,
                 )
                 result = loop.run(
                     run_id=run_id,

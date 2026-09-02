@@ -14,7 +14,7 @@ const running: Run = {
   prompt_version: 'v1', status: 'running', max_steps: 20, step_count: 0,
   final_response: null, error_text: null, created_at: '2026-09-01T00:00:00Z',
   updated_at: '2026-09-01T00:00:00Z', finished_at: null,
-  messages: [], tool_calls: [], file_changes: [],
+  messages: [], tool_calls: [], file_changes: [], agent_executions: [],
 }
 
 let handlers: { onEvent(event: RunEvent): void, onError(): void, onClose(): void }
@@ -123,7 +123,7 @@ test('deferred reconciliation for another run cannot disconnect the selection', 
 
   const runB: Run = {
     ...running, id: 'run-2', session_id: 'session-2', messages: [], tool_calls: [],
-    file_changes: [],
+    file_changes: [], agent_executions: [],
   }
   store.details[runB.id] = runB
   store.selectRun(runB.id)
@@ -176,6 +176,26 @@ test('keeps the live draft when a durable message arrives', async () => {
   }))
 
   expect(store.selected_draft).toEqual({ text: 'Hello', active: true })
+})
+
+test('upserts live agent execution state', async () => {
+  api.createRun.mockResolvedValue(running)
+  const store = useRunsStore()
+  await store.submit('session-1', { prompt: 'inspect' })
+  const execution = {
+    id: 'agent-1', run_id: 'run-1', parent_execution_id: null, role: 'manager' as const,
+    task: 'inspect', status: 'running' as const, step_count: 0,
+    final_result_json: null, started_at: running.created_at, finished_at: null,
+  }
+
+  handlers.onEvent(event('agent.started', execution))
+  handlers.onEvent(event('agent.finished', {
+    ...execution, status: 'completed', step_count: 2, finished_at: running.updated_at,
+  }))
+
+  expect(store.selected?.agent_executions).toHaveLength(1)
+  expect(store.selected?.agent_executions[0].status).toBe('completed')
+  expect(store.selected?.agent_executions[0].step_count).toBe(2)
 })
 
 test('replaces a stale draft when a new assistant turn starts', async () => {

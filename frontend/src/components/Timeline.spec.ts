@@ -10,7 +10,7 @@ const running: Run = {
   prompt_version: 'v1', status: 'running', max_steps: 20, step_count: 1,
   final_response: null, error_text: null,
   created_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-01T00:00:01Z',
-  finished_at: null, messages: [], tool_calls: [], file_changes: [],
+  finished_at: null, messages: [], tool_calls: [], file_changes: [], agent_executions: [],
 }
 
 const completed: Run = {
@@ -18,7 +18,7 @@ const completed: Run = {
   prompt_version: 'v1', status: 'completed', max_steps: 20, step_count: 1,
   final_response: 'Saved answer', error_text: null,
   created_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-01T00:00:01Z',
-  finished_at: '2026-09-01T00:00:01Z', messages: [], tool_calls: [], file_changes: [],
+  finished_at: '2026-09-01T00:00:01Z', messages: [], tool_calls: [], file_changes: [], agent_executions: [],
 }
 
 const completedWithEmptyResponse: Run = {
@@ -26,7 +26,7 @@ const completedWithEmptyResponse: Run = {
   prompt_version: 'v1', status: 'completed', max_steps: 20, step_count: 1,
   final_response: '', error_text: null,
   created_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-01T00:00:01Z',
-  finished_at: '2026-09-01T00:00:01Z', messages: [], tool_calls: [], file_changes: [],
+  finished_at: '2026-09-01T00:00:01Z', messages: [], tool_calls: [], file_changes: [], agent_executions: [],
 }
 
 test('renders task evidence and final response', () => {
@@ -35,7 +35,7 @@ test('renders task evidence and final response', () => {
     prompt_version: 'v1', status: 'completed', max_steps: 20, step_count: 1,
     final_response: 'Everything is ready.', error_text: null,
     created_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-01T00:00:01Z',
-    finished_at: '2026-09-01T00:00:01Z', messages: [], tool_calls: [], file_changes: [],
+    finished_at: '2026-09-01T00:00:01Z', messages: [], tool_calls: [], file_changes: [], agent_executions: [],
   }
   render(Timeline, { props: {
     title: 'Demo', history: [run], selected: run, draft: '', streaming: false,

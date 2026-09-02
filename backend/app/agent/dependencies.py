@@ -31,6 +31,9 @@ def get_agent_service(
     return AgentService(
         request.app.state.session_factory,
         model_client,  # type: ignore[arg-type]
+        multi_agent_enabled=request.app.state.settings.agent_multi_agent_enabled,
+        max_delegations=request.app.state.settings.agent_max_delegations,
+        child_step_limit=request.app.state.settings.agent_child_step_limit,
     )
 
 

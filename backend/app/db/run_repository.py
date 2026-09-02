@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.agent.workspace import FileChangeEvidence
 from app.db.models import (
     RUN_STATUSES,
+    AgentExecutionRecord,
     FileChangeRecord,
     MessageRecord,
     RunRecord,
@@ -65,6 +66,20 @@ class FileChangeDetail:
 
 
 @dataclass(frozen=True, slots=True)
+class AgentExecutionDetail:
+    id: str
+    run_id: str
+    parent_execution_id: str | None
+    role: str
+    task: str
+    status: str
+    step_count: int
+    final_result_json: str | None
+    started_at: datetime
+    finished_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
 class RunDetail:
     id: str
     session_id: str
@@ -82,6 +97,7 @@ class RunDetail:
     messages: tuple[MessageDetail, ...]
     tool_calls: tuple[ToolCallDetail, ...]
     file_changes: tuple[FileChangeDetail, ...]
+    agent_executions: tuple[AgentExecutionDetail, ...]
 
 
 class RunRepository:
@@ -148,6 +164,47 @@ class RunRepository:
             arguments_json=arguments_json,
         )
         self.db.add(record)
+        self._flush_refresh_and_commit(record)
+        return record
+
+    def start_agent_execution(
+        self,
+        run_id: str,
+        *,
+        role: str,
+        task: str,
+        parent_execution_id: str | None = None,
+    ) -> AgentExecutionRecord:
+        self._require_run(run_id)
+        if parent_execution_id is not None:
+            parent = self._require_agent_execution(parent_execution_id)
+            if parent.run_id != run_id:
+                raise ValueError("Parent agent execution does not belong to the run")
+        record = AgentExecutionRecord(
+            run_id=run_id,
+            parent_execution_id=parent_execution_id,
+            role=role,
+            task=task,
+        )
+        self.db.add(record)
+        self._flush_refresh_and_commit(record)
+        return record
+
+    def finish_agent_execution(
+        self,
+        execution_id: str,
+        status: str,
+        *,
+        step_count: int,
+        final_result_json: str | None = None,
+    ) -> AgentExecutionRecord:
+        if status not in {"completed", "failed", "cancelled"}:
+            raise ValueError("Agent execution status must be terminal")
+        record = self._require_agent_execution(execution_id)
+        record.status = status
+        record.step_count = step_count
+        record.final_result_json = final_result_json
+        record.finished_at = utc_now()
         self._flush_refresh_and_commit(record)
         return record
 
@@ -239,6 +296,16 @@ class RunRepository:
                 .order_by(FileChangeRecord.created_at.asc(), FileChangeRecord.id.asc())
             )
         )
+        agent_executions = tuple(
+            self._agent_execution_detail(record)
+            for record in self.db.scalars(
+                select(AgentExecutionRecord)
+                .where(AgentExecutionRecord.run_id == run_id)
+                .order_by(
+                    AgentExecutionRecord.started_at.asc(), AgentExecutionRecord.id.asc()
+                )
+            )
+        )
         return RunDetail(
             id=run.id,
             session_id=run.session_id,
@@ -256,6 +323,7 @@ class RunRepository:
             messages=messages,
             tool_calls=tool_calls,
             file_changes=file_changes,
+            agent_executions=agent_executions,
         )
 
     def list_runs(self, session_id: str) -> tuple[RunDetail, ...]:
@@ -368,6 +436,12 @@ class RunRepository:
             raise ValueError("Tool call not found")
         return record
 
+    def _require_agent_execution(self, execution_id: str) -> AgentExecutionRecord:
+        record = self.db.get(AgentExecutionRecord, execution_id)
+        if record is None:
+            raise ValueError("Agent execution not found")
+        return record
+
     def _flush_refresh_and_commit(self, record: object) -> None:
         self.db.flush()
         self.db.refresh(record)
@@ -412,4 +486,19 @@ class RunRepository:
             after_hash=record.after_hash,
             unified_diff=record.unified_diff,
             created_at=record.created_at,
+        )
+
+    @staticmethod
+    def _agent_execution_detail(record: AgentExecutionRecord) -> AgentExecutionDetail:
+        return AgentExecutionDetail(
+            id=record.id,
+            run_id=record.run_id,
+            parent_execution_id=record.parent_execution_id,
+            role=record.role,
+            task=record.task,
+            status=record.status,
+            step_count=record.step_count,
+            final_result_json=record.final_result_json,
+            started_at=record.started_at,
+            finished_at=record.finished_at,
         )
