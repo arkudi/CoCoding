@@ -46,6 +46,21 @@ test('renders task evidence and final response', () => {
   expect(screen.getByText('已完成')).toBeTruthy()
 })
 
+test('renders the final response as Markdown instead of literal syntax', () => {
+  const run: Run = {
+    ...completed,
+    final_response: '## 已完成\n\n- 修改文件\n- 测试通过',
+  }
+  render(Timeline, { props: {
+    title: 'Demo', history: [run], selected: run, draft: '', streaming: false,
+    cancelling: false, error: null,
+  } })
+
+  expect(screen.getByRole('heading', { name: '已完成', level: 2 })).toBeTruthy()
+  expect(screen.queryByText('## 已完成')).toBeNull()
+  expect(screen.getAllByRole('listitem')).toHaveLength(2)
+})
+
 test('renders a live assistant draft with generation status', () => {
   render(Timeline, { props: {
     title: 'Demo', history: [running], selected: running,
@@ -107,8 +122,8 @@ test('renders the whole session as one chronological conversation with a collaps
     cancelling: false, error: null,
   } })
 
-  const messages = [...view.container.querySelectorAll('.message p')]
-    .map(node => node.textContent)
+  const messages = [...view.container.querySelectorAll('.user-message p, .assistant-message .markdown-content')]
+    .map(node => node.textContent?.trim())
   expect(messages).toEqual([
     'First requirement', 'First final reply', 'Second requirement', 'Second final reply',
   ])

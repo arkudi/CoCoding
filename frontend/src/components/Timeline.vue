@@ -3,6 +3,7 @@ import { computed, nextTick, ref, watch } from 'vue'
 import RunComposer from './RunComposer.vue'
 import ToolChain from './ToolChain.vue'
 import AgentTeam from './AgentTeam.vue'
+import MarkdownContent from './MarkdownContent.vue'
 import type { Run, RunCreate } from '@/types/run'
 
 const props = defineProps<{
@@ -98,7 +99,7 @@ function isStreaming(run: Run) {
             :class="{ streaming: isStreaming(run) }"
           >
             <span>Agent</span>
-            <p>{{ responseFor(run) }}</p>
+            <MarkdownContent :content="responseFor(run)" />
             <small v-if="isStreaming(run)" class="streaming-status" role="status">正在生成</small>
           </article>
           <p v-if="run.error_text" class="run-error" role="alert">{{ run.error_text }}</p>
