@@ -4,16 +4,22 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class SessionCreate(BaseModel):
-    title: str = Field(min_length=1, max_length=120)
+    title: str | None = Field(default=None, min_length=1, max_length=120)
     workspace_path: str = Field(min_length=1, max_length=1024)
 
     @field_validator("title")
     @classmethod
-    def normalize_title(cls, value: str) -> str:
+    def normalize_title(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         normalized = value.strip()
         if not normalized:
             raise ValueError("Title must not be blank")
         return normalized
+
+
+class DirectorySelectionRead(BaseModel):
+    path: str | None
 
 
 class SessionRead(BaseModel):

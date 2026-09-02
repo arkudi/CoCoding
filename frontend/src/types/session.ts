@@ -17,6 +17,6 @@ export type SessionStatus =
   | 'interrupted'
 
 export interface SessionCreate {
-  title: string
+  title?: string
   workspace_path: string
 }
