@@ -51,7 +51,7 @@ class RunManager:
         max_delegations: int = 3,
         child_step_limit: int = 10,
         token_budget: int = 200_000,
-        tool_call_limit: int = 200,
+        tool_call_limit: int = 300,
         wall_clock_limit_seconds: int = 900,
     ) -> None:
         self._session_factory = session_factory

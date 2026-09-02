@@ -371,7 +371,7 @@ def test_assistant_turn_persists_exactly_once_and_history_precedes_current_user(
     assert len([message for message in detail.messages if message.role == "assistant"]) == 1
     messages = model.calls[0]["messages"]
     assert [message["role"] for message in messages] == ["system", "user", "assistant", "user"]
-    assert "coding_agent_v1" in messages[0]["content"]
+    assert "coding_agent_v2" in messages[0]["content"]
     assert messages[-1]["content"] == "current user"
 
 

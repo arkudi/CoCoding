@@ -17,6 +17,7 @@ from app.agent.orchestration import (
     SharedStepBudget,
     build_manager_prompt,
 )
+from app.agent.prompts import PROMPT_VERSION
 from app.agent.tools import ToolRegistry
 from app.agent.title import generate_task_title, needs_generated_title
 from app.agent.types import ModelClient
@@ -26,8 +27,8 @@ from app.db.models import SessionRecord
 from app.db.run_repository import RunDetail, RunRepository
 
 
-_PROMPT_VERSION = "coding_agent_v1"
-_MULTI_AGENT_PROMPT_VERSION = "manager_worker_v1"
+_PROMPT_VERSION = PROMPT_VERSION
+_MULTI_AGENT_PROMPT_VERSION = "manager_worker_v2"
 _INTERNAL_ERROR = "The run failed because of an internal error."
 
 logger = logging.getLogger(__name__)
@@ -60,7 +61,7 @@ class AgentService:
         max_delegations: int = 3,
         child_step_limit: int = 10,
         token_budget: int = 200_000,
-        tool_call_limit: int = 200,
+        tool_call_limit: int = 300,
         wall_clock_limit_seconds: int = 900,
     ) -> None:
         self.session_factory = session_factory
