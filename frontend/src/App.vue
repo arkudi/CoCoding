@@ -12,17 +12,23 @@ const runs = useRunsStore()
 const workspace = useWorkspaceStore()
 const current = computed(() => sessions.items.find(item => item.id === sessions.current_id))
 onMounted(() => sessions.load())
-onUnmounted(() => runs.disconnect())
+onUnmounted(() => {
+  runs.disconnect()
+  workspace.reset()
+})
 
 watch(
   () => sessions.current_id,
   async (sessionId) => {
     runs.disconnect()
     workspace.reset()
-    if (sessionId) await Promise.all([
-      runs.loadHistory(sessionId),
-      workspace.loadFiles(sessionId),
-    ])
+    if (sessionId) {
+      await Promise.all([
+        runs.loadHistory(sessionId),
+        workspace.loadFiles(sessionId),
+      ])
+      if (sessions.current_id === sessionId) workspace.startWatching(sessionId)
+    }
   },
 )
 </script>
@@ -47,8 +53,13 @@ watch(
       :selected-path="workspace.selected_path"
       :preview="workspace.preview"
       :error="workspace.error"
+      :loading="workspace.loading"
+      :syncing="workspace.syncing"
+      :truncated="workspace.truncated"
+      :last-synced-at="workspace.last_synced_at"
       :file-changes="runs.selected?.file_changes ?? []"
       @select-file="current && workspace.selectFile(current.id, $event)"
+      @refresh="current && workspace.sync(current.id)"
     />
   </div>
 </template>

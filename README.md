@@ -83,6 +83,12 @@ curl.exe -sS -X POST "http://127.0.0.1:8000/api/sessions/$($session.id)/runs" `
 
 The returned Run initially has status `running`. Follow `ws://127.0.0.1:8000/api/runs/{run_id}/events`, or query `GET /api/runs/{run_id}`. Run history is available from `GET /api/sessions/{session_id}/runs`.
 
+The workspace panel renders files as a collapsible directory tree and rescans the
+selected workspace every 1.5 seconds. Files added, removed, or edited outside the
+application appear without reloading the page; an open text preview is refreshed as
+well. Browser listings include up to 20,000 non-ignored project files and clearly mark
+the result if that safety limit is reached.
+
 Multi-agent orchestration is enabled by default. A read-only Manager can delegate
 bounded subtasks to an Explorer, an Implementer, or an independent Reviewer. Only
 the Implementer receives write and general command tools. Independent Explorer and

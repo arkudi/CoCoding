@@ -7,6 +7,7 @@ test('switches to Diff and renders unified file evidence', async () => {
   const user = userEvent.setup()
   render(Workspace, { props: {
     files: [], selectedPath: null, preview: null, error: null,
+    loading: false, syncing: false, truncated: false, lastSyncedAt: null,
     fileChanges: [{
       id: 'change-1', run_id: 'run-1', relative_path: 'src/main.py', operation: 'modified',
       before_hash: 'a', after_hash: 'b', unified_diff: '-old\n+new\n',
