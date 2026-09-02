@@ -31,6 +31,7 @@ watch(
   <div class="app-shell">
     <Sidebar />
     <Timeline
+      :session-id="current?.id"
       :title="current?.title"
       :history="current ? runs.history_by_session[current.id] ?? [] : []"
       :selected="runs.selected"
@@ -38,7 +39,6 @@ watch(
       :streaming="runs.selected_draft?.active ?? false"
       :cancelling="runs.cancelling"
       :error="runs.error"
-      @select="runs.selectRun"
       @submit="current && runs.submit(current.id, $event)"
       @cancel="runs.requestCancel"
     />
