@@ -104,3 +104,30 @@ test('does not restore a deleted session when an older history load finishes', a
   expect(sessions.current_id).toBeNull()
   expect(sessions.loading).toBe(false)
 })
+
+test('opens the workspace picker at the current task directory', async () => {
+  const current = {
+    id: 'current', title: 'Current task', workspace_path: 'F:/Codes/current', status: 'idle' as const,
+    created_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-01T00:00:00Z',
+  }
+  const created = {
+    id: 'next', title: 'Next task', workspace_path: 'F:/Codes/next', status: 'idle' as const,
+    created_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-01T00:00:00Z',
+  }
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ path: created.workspace_path })))
+    .mockResolvedValueOnce(new Response(JSON.stringify(created), { status: 201 }))
+  vi.stubGlobal('fetch', fetchMock)
+  const sessions = useSessionsStore()
+  sessions.items = [current]
+  sessions.current_id = current.id
+
+  await sessions.createFromPicker()
+
+  expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/sessions/select-workspace', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ initial_path: current.workspace_path }),
+  })
+  expect(sessions.current_id).toBe(created.id)
+})

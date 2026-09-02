@@ -59,7 +59,8 @@ export const useSessionsStore = defineStore('sessions', {
       if (session) session.title = title
     },
     async createFromPicker() {
-      const selection = await sessionApi.selectWorkspace()
+      const current = this.items.find(item => item.id === this.current_id)
+      const selection = await sessionApi.selectWorkspace(current?.workspace_path)
       if (!selection.path) return null
       return this.create({ workspace_path: selection.path })
     },
